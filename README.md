@@ -88,6 +88,15 @@ python backtest.py --days 730 # last 2 years (better)
 It runs the exact same signals on past 5-min candles and prints win rate, profit factor, drawdown, and a
 **VERDICT**. Only if it says **EDGE FOUND** set `trade_shares: true` in `config.yaml` (still in paper).
 
+### 5b. Search for better settings (recommended)
+```
+python optimize.py
+```
+Tries 216 versions of the strategy (stop width, target size, signal strictness, trend filter, longs-only,
+morning-only). It picks the best 5 using the older 2 years, then checks them on the most recent year,
+which they never saw. It only reports **PASSED** if a version holds up on both SPY and QQQ in both periods.
+It prints the exact `config.yaml` lines to change. Takes a few minutes the first time (downloads 3 years of data).
+
 ### 6. Start the bot
 - Windows: double-click `start_bot.bat`
 - Mac: `./start_bot.sh`
@@ -144,6 +153,7 @@ accurate signals and fills, Alpaca's paid data plan unlocks `stock_feed: sip` an
 | `run_bot.py` | Starts the bot |
 | `check_setup.py` | Tests your setup, no trading |
 | `backtest.py` | Tests the strategy on past data |
+| `optimize.py` | Searches for better settings, checked on unseen data |
 | `report.py` | Your performance |
 | `bot/` | The code (strategy, news, options picker, risk, exits, broker) |
 | `tests/` | Offline tests: `python -m pip install pytest` then `python -m pytest -q` |

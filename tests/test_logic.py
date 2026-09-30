@@ -16,7 +16,7 @@ from bot.indicators import add_all, rsi  # noqa: E402
 from bot.news import NewsMonitor, is_shock, score_text  # noqa: E402
 from bot.options_selector import pick_contract  # noqa: E402
 from bot.risk import RiskManager  # noqa: E402
-from bot.strategy import daily_with_live, evaluate  # noqa: E402
+from bot.strategy import daily_dates, daily_with_live, evaluate  # noqa: E402
 
 ET = ZoneInfo("America/New_York")
 CFG = load_config()
@@ -169,7 +169,7 @@ def test_event_blackout(tmp_path):
 
 def test_daily_with_live_excludes_today():
     d = daily_trend(True)
-    today = d.index[-1].tz_convert(ET).date()
+    today = daily_dates(d)[-1]
     out = daily_with_live(d, 999.0, today)
     assert out["close"].iloc[-1] == 999.0 and len(out) == len(d)
 
@@ -195,3 +195,61 @@ def test_backtest_runs_and_no_overnight():
     s = stats(t, 30000)
     assert s["trades"] == len(t)
     assert isinstance(verdict(t, 30000), str)
+
+
+def _random_market(days=80, seed=11):
+    rng = np.random.default_rng(seed)
+    frames, px = [], 600.0
+    for d in pd.bdate_range("2026-01-05", periods=days):
+        drift = rng.choice([-0.06, 0.0, 0.06])
+        path = np.cumsum(rng.normal(drift, 0.35, 78))
+        frames.append(make_day(list(path), str(d.date()), start=px, vol=rng.uniform(5e4, 2e5)))
+        px = frames[-1].close.iloc[-1]
+    intraday = pd.concat(frames)
+    daily = intraday.resample("1D").agg({"open": "first", "high": "max", "low": "min", "close": "last",
+                                        "volume": "sum"}).dropna()
+    daily.index = daily.index.tz_convert("UTC")
+    return intraday, daily
+
+
+def test_fast_signals_match_live_strategy():
+    """The vectorized backtest signals must produce exactly the same trades as the live bot's code."""
+    intraday, daily = _random_market()
+    for overrides in ({}, {"min_score": 5, "allow_shorts": False}, {"min_adx": 25, "atr_stop_mult": 2.5}):
+        cfg = {**CFG, "strategy": {**CFG["strategy"], **overrides}}
+        fast = simulate("SPY", intraday, daily, cfg)
+        slow = simulate("SPY", intraday, daily, cfg, reference=True)
+        assert len(fast) > 10
+        pd.testing.assert_frame_equal(fast.reset_index(drop=True), slow.reset_index(drop=True))
+        if overrides.get("allow_shorts") is False:
+            assert (fast.dir == "long").all()
+
+
+def test_optimizer_rejects_random_data(tmp_path):
+    """On a pure random walk (no real edge exists) the strategy search must NOT report a pass."""
+    import optimize as O
+    monkeypatch_dir = tmp_path / "data_cache"
+    monkeypatch_dir.mkdir()
+    O.CACHE = monkeypatch_dir
+    O.ROOT = tmp_path
+    O.GRID = {"min_score": [4, 6], "atr_stop_mult": [1.5, 3.0], "reward_risk": [1.0, 2.0], "min_adx": [18, 25],
+              "allow_shorts": [True, False], "no_entries_after": ["15:00", "11:30"]}
+    for k, sym in enumerate(["SPY", "QQQ"]):
+        rng = np.random.default_rng(100 + k)
+        frames, px = [], 500.0
+        for d in pd.bdate_range("2023-10-02", "2026-09-29"):
+            frames.append(make_day(list(np.cumsum(rng.normal(0, .35, 78))), str(d.date()), start=px,
+                                   vol=rng.uniform(5e4, 2e5)))
+            px = frames[-1].close.iloc[-1]
+        i = pd.concat(frames)
+        d = i.resample("1D").agg({"open": "first", "high": "max", "low": "min", "close": "last",
+                                  "volume": "sum"}).dropna()
+        d.index = d.index.tz_convert("UTC")
+        i.tz_convert("UTC").to_csv(monkeypatch_dir / f"{sym}_5m_3y.csv")
+        d.to_csv(monkeypatch_dir / f"{sym}_1d_3y.csv")
+    import io, contextlib
+    out = io.StringIO()
+    sys.argv = ["optimize.py"]
+    with contextlib.redirect_stdout(out):
+        O.main()
+    assert "NOTHING PASSED" in out.getvalue(), out.getvalue()[-1500:]

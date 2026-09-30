@@ -15,6 +15,7 @@ Logic in plain English
 from dataclasses import dataclass, field
 from typing import Optional
 
+import numpy as np
 import pandas as pd
 
 from .indicators import add_all, ema
@@ -87,6 +88,8 @@ def evaluate(symbol: str, intraday: pd.DataFrame, daily: pd.DataFrame, cfg: dict
         trig = _fresh_trigger(df, side)
         if not trig:
             continue
+        if side == "short" and not s.get("allow_shorts", True):
+            continue
         if s.get("require_daily_trend", True):
             if side == "long" and trend == "bear":
                 continue
@@ -132,12 +135,18 @@ def evaluate(symbol: str, intraday: pd.DataFrame, daily: pd.DataFrame, cfg: dict
     return max(cands, key=lambda c: c.score) if cands else best
 
 
+def daily_dates(daily: pd.DataFrame) -> np.ndarray:
+    """Calendar date of each daily candle. +12h makes this correct whether the broker stamps
+    daily bars at midnight UTC or midnight New York time."""
+    idx = daily.index.tz_convert(ET) if daily.index.tz is not None else daily.index
+    return np.array((idx + pd.Timedelta(hours=12)).date)
+
+
 def daily_with_live(daily: pd.DataFrame, price: float, today) -> pd.DataFrame:
     """Daily candles through yesterday + today's live price as the latest close."""
     if daily is None or daily.empty:
         return daily
-    idx = daily.index.tz_convert(ET) if daily.index.tz is not None else daily.index
-    d = daily[idx.date < today]
+    d = daily[daily_dates(daily) < today]
     row = pd.DataFrame({"open": [price], "high": [price], "low": [price], "close": [price], "volume": [0.0]},
                        index=[d.index[-1] + pd.Timedelta(days=1)] if len(d) else [pd.Timestamp.now(tz="UTC")])
     return pd.concat([d, row])

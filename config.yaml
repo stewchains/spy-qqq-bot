@@ -28,6 +28,7 @@ strategy:
   rsi_long_range: [50, 70] # long only when RSI is in this band (not already overbought)
   rsi_short_range: [30, 50]
   min_adx: 18              # trend strength filter; below this the market is chopping
+  allow_shorts: true       # false = only take long trades (calls / buying shares)
   require_daily_trend: true  # only take longs in a daily uptrend and puts in a daily downtrend (neutral allows both)
   atr_stop_mult: 1.5       # underlying stop = entry -/+ 1.5 x ATR
   reward_risk: 2.0         # underlying target = 2x the stop distance

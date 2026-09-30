@@ -6,6 +6,8 @@ state.json
 trades.csv
 backtest_trades.csv
 logs/
+data_cache/
+optimize_results.csv
 
 # Python
 .venv/

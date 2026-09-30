@@ -1,6 +1,7 @@
 """Backtest engine for the share day-trading version of the strategy.
 
-Uses the exact same signal code as the live bot. Entries at the NEXT candle's open (no peeking),
+Signals come from fast_signals (a vectorized copy of the live bot's strategy.evaluate; the tests check
+they match trade-for-trade). Entries at the NEXT candle's open (no peeking),
 stop/target checked candle by candle (stop assumed first if both touched), everything flat by the close.
 """
 from datetime import timedelta
@@ -9,79 +10,94 @@ import numpy as np
 import pandas as pd
 
 from .exits import _t
+from .fast_signals import compute
 from .indicators import add_all
 from .strategy import daily_with_live, evaluate
 
 
 def simulate(symbol: str, intraday: pd.DataFrame, daily: pd.DataFrame, cfg: dict,
-             equity: float = 30000.0, slippage: float = 0.01) -> pd.DataFrame:
-    df = add_all(intraday)
+             equity: float = 30000.0, slippage: float = 0.01, prepared: pd.DataFrame | None = None,
+             reference: bool = False, trend=None) -> pd.DataFrame:
+    """prepared: intraday with indicators already added (saves time when testing many settings).
+    reference: use the slow bar-by-bar strategy.evaluate() instead of fast_signals (for testing)."""
+    df = prepared if prepared is not None else add_all(intraday)
     sch, risk = cfg["schedule"], cfg["risk"]
     bar_min = cfg["data"]["bar_minutes"]
-    t_start, t_end, t_flat = _t(sch["no_entries_before"]), _t(sch["no_entries_after"]), _t(sch["flatten_shares_at"])
+    mins = lambda t: t.hour * 60 + t.minute  # noqa: E731
+    t_start, t_end, t_flat = (mins(_t(sch[k])) for k in ("no_entries_before", "no_entries_after", "flatten_shares_at"))
     max_hold = cfg["options"]["max_hold_minutes"] * 1.5
+    rr = cfg["strategy"]["reward_risk"]
     idx = df.index
-    days = pd.Series(idx.date, index=idx)
-    trades = []
-    pos = None
-    trades_today, cur_day, cool_until = 0, None, None
+    o, h, l, c = (df[k].to_numpy(float) for k in ("open", "high", "low", "close"))
+    days = np.array(idx.date)
+    decided = idx + pd.Timedelta(minutes=bar_min)
+    dmin = np.asarray(decided.hour * 60 + decided.minute)
+    epoch, sec = pd.Timestamp(0, tz="UTC"), pd.Timedelta(seconds=1)
+    dts = np.asarray((decided - epoch) / sec)  # seconds since 1970, for fast time-stop math
+    ots = np.asarray((idx - epoch) / sec)
+    if not reference:
+        sig_dir, _, sig_stop = compute(df, daily, cfg, trend=trend)
 
+    trades, pos = [], None
+    trades_today, cur_day, cool_until = 0, None, None
     for i in range(30, len(df) - 1):
-        ts = idx[i]
-        decided_at = ts + timedelta(minutes=bar_min)
-        if ts.date() != cur_day:
-            cur_day, trades_today, cool_until = ts.date(), 0, None
-        bar = df.iloc[i]
+        if days[i] != cur_day:
+            cur_day, trades_today, cool_until = days[i], 0, None
 
         if pos:  # ---- manage open trade on this candle
             long = pos["dir"] == "long"
-            exit_px, why = None, None
-            if long and bar.low <= pos["stop"]:
-                exit_px, why = min(bar.open, pos["stop"]), "stop"
-            elif not long and bar.high >= pos["stop"]:
-                exit_px, why = max(bar.open, pos["stop"]), "stop"
-            elif long and bar.high >= pos["target"]:
-                exit_px, why = max(bar.open, pos["target"]), "target"
-            elif not long and bar.low <= pos["target"]:
-                exit_px, why = min(bar.open, pos["target"]), "target"
-            elif decided_at.time() >= t_flat or days.iloc[i + 1] != ts.date():
-                exit_px, why = bar.close, "end of day"
-            elif (decided_at - pos["t"]).total_seconds() / 60 >= max_hold:
-                exit_px, why = bar.close, "time stop"
+            exit_px = why = None
+            if long and l[i] <= pos["stop"]:
+                exit_px, why = min(o[i], pos["stop"]), "stop"
+            elif not long and h[i] >= pos["stop"]:
+                exit_px, why = max(o[i], pos["stop"]), "stop"
+            elif long and h[i] >= pos["target"]:
+                exit_px, why = max(o[i], pos["target"]), "target"
+            elif not long and l[i] <= pos["target"]:
+                exit_px, why = min(o[i], pos["target"]), "target"
+            elif dmin[i] >= t_flat or days[i + 1] != days[i]:
+                exit_px, why = c[i], "end of day"
+            elif (dts[i] - pos["t0"]) / 60 >= max_hold:
+                exit_px, why = c[i], "time stop"
             if exit_px is not None:
                 sign = 1 if long else -1
                 exit_px -= sign * slippage
                 pnl = sign * (exit_px - pos["entry"]) * pos["qty"]
-                trades.append({"symbol": symbol, "opened": pos["t"], "closed": decided_at, "dir": pos["dir"],
+                trades.append({"symbol": symbol, "opened": pos["t"], "closed": decided[i], "dir": pos["dir"],
                                "entry": round(pos["entry"], 2), "exit": round(exit_px, 2), "qty": pos["qty"],
                                "R": round(sign * (exit_px - pos["entry"]) / pos["risk"], 2),
                                "pnl": round(pnl, 2), "why": why})
                 if pnl < 0:
-                    cool_until = decided_at + timedelta(minutes=risk["cooldown_after_loss_min"])
+                    cool_until = decided[i] + timedelta(minutes=risk["cooldown_after_loss_min"])
                 pos = None
             continue
 
         # ---- look for entries
-        if not (t_start <= decided_at.time() < t_end) or trades_today >= risk["max_trades_per_day"]:
+        if not (t_start <= dmin[i] < t_end) or trades_today >= risk["max_trades_per_day"]:
             continue
-        if cool_until and decided_at < cool_until:
+        if cool_until is not None and decided[i] < cool_until:
             continue
-        if days.iloc[i + 1] != ts.date():
+        if days[i + 1] != days[i]:
             continue
-        d = daily_with_live(daily, float(bar.close), ts.date())
-        sig = evaluate(symbol, df.iloc[max(0, i - 60): i + 1], d, cfg, prepared=True)
-        if not sig.direction:
+        if reference:
+            d = daily_with_live(daily, float(c[i]), days[i])
+            sig = evaluate(symbol, df.iloc[max(0, i - 60): i + 1], d, cfg, prepared=True)
+            if not sig.direction:
+                continue
+            direction, r = sig.direction, abs(sig.entry - sig.stop)
+        else:
+            if sig_dir[i] == 0:
+                continue
+            direction, r = ("long" if sig_dir[i] == 1 else "short"), float(sig_stop[i])
+        if not r > 0:
             continue
-        nxt = df.iloc[i + 1]
-        sign = 1 if sig.direction == "long" else -1
-        entry = nxt.open + sign * slippage
-        r = abs(sig.entry - sig.stop)
+        sign = 1 if direction == "long" else -1
+        entry = o[i + 1] + sign * slippage
         qty = int(min(equity * risk["risk_per_trade_pct"] / r, equity * risk["max_share_position_pct"] / entry))
         if qty < 1:
             continue
-        pos = {"dir": sig.direction, "entry": entry, "stop": entry - sign * r,
-               "target": entry + sign * r * cfg["strategy"]["reward_risk"], "risk": r, "qty": qty,
-               "t": idx[i + 1]}
+        pos = {"dir": direction, "entry": entry, "stop": entry - sign * r, "target": entry + sign * r * rr,
+               "risk": r, "qty": qty, "t": idx[i + 1], "t0": ots[i + 1]}
         trades_today += 1
     return pd.DataFrame(trades)
 
