@@ -67,12 +67,18 @@ class TradingBot:
         if acct["blocked"]:
             raise SystemExit("Account is blocked from trading. Check your Alpaca dashboard.")
         self.reconcile()
+        traded_today = False
         while True:
             try:
                 clock = self.broker.clock()
                 if not clock.is_open:
+                    if traded_today and self.cfg["schedule"].get("exit_after_close", True):
+                        self.reconcile()
+                        log.info("Market closed for the day. Bot exiting (it starts fresh next morning).")
+                        return
                     self.sleep_until_open(clock)
                     continue
+                traded_today = True
                 self.cycle()
             except KeyboardInterrupt:
                 raise

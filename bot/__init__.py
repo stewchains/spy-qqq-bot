@@ -1,6 +1,7 @@
 """SPY / QQQ options + day-trading bot."""
 import logging
 import os
+import socket
 from datetime import datetime
 from pathlib import Path
 
@@ -34,3 +35,18 @@ def setup_logging():
                   logging.FileHandler(logs / f"bot-{datetime.now():%Y-%m-%d}.log", encoding="utf-8")])
     for noisy in ("urllib3", "websockets", "alpaca"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
+
+
+def single_instance(port: int = 47823):
+    """Returns a held socket if this is the only copy of the bot running, else None.
+    Windows releases the port automatically when the bot exits or crashes, so it can never get stuck."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):  # Windows: don't let a second process share the port
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+    try:
+        s.bind(("127.0.0.1", port))
+        s.listen(1)
+        return s
+    except OSError:
+        s.close()
+        return None

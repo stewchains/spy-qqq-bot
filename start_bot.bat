@@ -1,6 +1,7 @@
 @echo off
-REM Windows: double-click to start the bot.
+REM Windows: double-click to start the bot (or let Task Scheduler start it each morning).
 REM Uses the .venv virtual environment if its packages are installed, otherwise your regular Python.
+REM If a copy is already running, this one exits right away.
 cd /d "%~dp0"
 set PY=python
 if exist .venv\Scripts\python.exe (
@@ -8,4 +9,5 @@ if exist .venv\Scripts\python.exe (
 )
 echo Using %PY%
 %PY% run_bot.py
-pause
+REM Keep the window open only if something went wrong, so you can read the error.
+if errorlevel 1 pause

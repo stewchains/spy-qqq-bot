@@ -2,11 +2,15 @@
 import os
 import sys
 
-from bot import load_config, load_keys, setup_logging
+from bot import load_config, load_keys, setup_logging, single_instance
 from bot.engine import TradingBot
 
 
 def main():
+    lock = single_instance()
+    if lock is None:
+        print("The bot is already running in another window. Not starting a second copy.")
+        sys.exit(0)
     setup_logging()
     cfg = load_config()
     key, secret = load_keys()

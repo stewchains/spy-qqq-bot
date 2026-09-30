@@ -257,3 +257,14 @@ def test_optimizer_rejects_random_data(tmp_path):
     with contextlib.redirect_stdout(out):
         O.main()
     assert "NOTHING PASSED" in out.getvalue(), out.getvalue()[-1500:]
+
+
+def test_single_instance_lock():
+    from bot import single_instance
+    first = single_instance(47899)
+    assert first is not None
+    assert single_instance(47899) is None      # second copy is refused
+    first.close()
+    again = single_instance(47899)             # released when the first copy exits
+    assert again is not None
+    again.close()

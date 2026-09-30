@@ -22,6 +22,7 @@ schedule:                  # all times are US/Eastern (market time). Oklahoma is
   flatten_options_at: "15:40"  # close every bot option position before the close
   flatten_shares_at: "15:50"   # close every bot share position (day trades never held overnight)
   loop_seconds: 60             # how often the bot checks everything
+  exit_after_close: true       # bot closes itself after the market closes, so a new copy starts clean each morning
 
 strategy:
   min_score: 4             # signal strength needed to enter (max possible = 7). 4 = ~1-2 trades/day; 6 = ~1/week
