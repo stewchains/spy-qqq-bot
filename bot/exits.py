@@ -7,7 +7,18 @@ def _t(s: str) -> dtime:
     return dtime(h, m)
 
 
-def option_exit_reason(pos: dict, mark: float, und_price: float, now_et: datetime, cfg: dict):
+def session_time(cfg_time: str, close_et: datetime | None) -> dtime:
+    """A config time (written for a normal 4:00 PM ET close) shifted earlier on half days.
+    e.g. flatten at "15:40" = 20 min before the close -> 12:40 when the market closes at 1:00 PM."""
+    t = _t(cfg_time)
+    if close_et is None or close_et.time() >= dtime(16, 0):
+        return t
+    offset = datetime.combine(close_et.date(), dtime(16, 0)) - datetime.combine(close_et.date(), t)
+    return min(t, (datetime.combine(close_et.date(), close_et.time()) - offset).time())
+
+
+def option_exit_reason(pos: dict, mark: float, und_price: float, now_et: datetime, cfg: dict,
+                       flatten_at: dtime | None = None):
     """pos keys: entry_price, peak, direction, und_stop, und_target, entry_time (iso), expiration (iso date).
     Returns a reason string if the position should be closed now, else None. Updates pos['peak']."""
     o, sch = cfg["options"], cfg["schedule"]
@@ -18,7 +29,7 @@ def option_exit_reason(pos: dict, mark: float, und_price: float, now_et: datetim
     pnl = mark / entry - 1
     peak_pnl = pos["peak"] / entry - 1
 
-    if now_et.time() >= _t(sch["flatten_options_at"]):
+    if now_et.time() >= (flatten_at or _t(sch["flatten_options_at"])):
         return "end-of-day flatten"
     if pos.get("expiration") == now_et.date().isoformat() and now_et.time() >= dtime(15, 0):
         return "expires today"

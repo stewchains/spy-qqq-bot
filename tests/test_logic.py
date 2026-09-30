@@ -268,3 +268,18 @@ def test_single_instance_lock():
     again = single_instance(47899)             # released when the first copy exits
     assert again is not None
     again.close()
+
+
+def test_half_day_flatten_times():
+    from datetime import time as dtime
+    from bot.exits import session_time
+    normal = datetime(2026, 11, 25, 16, 0, tzinfo=ET)
+    half = datetime(2026, 11, 27, 13, 0, tzinfo=ET)          # day after Thanksgiving: 1:00 PM ET close
+    assert session_time("15:40", normal) == dtime(15, 40)
+    assert session_time("15:40", half) == dtime(12, 40)       # options closed 20 min before the early close
+    assert session_time("15:50", half) == dtime(12, 50)       # shares 10 min before
+    assert session_time("15:40", None) == dtime(15, 40)
+    pos = {"entry_price": 2.0, "peak": 2.0, "direction": "long", "und_stop": 590, "und_target": 610,
+           "entry_time": datetime(2026, 11, 27, 10, 0, tzinfo=ET).isoformat(), "expiration": "2026-12-04"}
+    now = datetime(2026, 11, 27, 12, 45, tzinfo=ET)
+    assert "end-of-day" in option_exit_reason(dict(pos), 2.0, 600, now, CFG, flatten_at=session_time("15:40", half))

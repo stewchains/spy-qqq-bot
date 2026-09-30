@@ -3,7 +3,7 @@ import csv
 import json
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -11,7 +11,7 @@ import pandas as pd
 
 from .broker import Broker
 from .events import EventCalendar
-from .exits import option_exit_reason, _t
+from .exits import option_exit_reason, session_time, _t
 from .news import NewsMonitor
 from .options_selector import pick_contract
 from .risk import RiskManager
@@ -38,6 +38,7 @@ class TradingBot:
         self._daily_cache: dict = {}
         self._last_signal_log: dict = {}
         self._last_exit: dict = {}
+        self.close_et = None  # today's market close (earlier on half days)
 
     # ------------------------------------------------------------------ persistence
     def save(self):
@@ -79,6 +80,7 @@ class TradingBot:
                     self.sleep_until_open(clock)
                     continue
                 traded_today = True
+                self.close_et = clock.next_close.astimezone(ET)
                 self.cycle()
             except KeyboardInterrupt:
                 raise
@@ -117,7 +119,10 @@ class TradingBot:
         self.manage_exits(now)
 
         sch = self.cfg["schedule"]
-        if not (_t(sch["no_entries_before"]) <= now.time() < _t(sch["no_entries_after"])):
+        last_entry = _t(sch["no_entries_after"])
+        if self.close_et is not None:  # never open new trades in the last hour (matters on half days)
+            last_entry = min(last_entry, (self.close_et - timedelta(hours=1)).time())
+        if not (_t(sch["no_entries_before"]) <= now.time() < last_entry):
             return
         ok, why = self.risk.can_open(now, acct["equity"], len(self.state))
         if not ok:
@@ -206,7 +211,7 @@ class TradingBot:
             if pos["kind"] == "shares":
                 held = (now - datetime.fromisoformat(pos["entry_time"])).total_seconds() / 60
                 reason = None
-                if now.time() >= _t(sch["flatten_shares_at"]):
+                if now.time() >= session_time(sch["flatten_shares_at"], self.close_et):
                     reason = "end-of-day flatten"
                 elif held >= self.cfg["options"]["max_hold_minutes"] * 1.5:
                     reason = f"time stop ({held:.0f} min)"
@@ -216,7 +221,8 @@ class TradingBot:
                 continue
             bid, ask = self.broker.option_quote(sym)
             mark = (bid + ask) / 2 if bid > 0 else 0.0
-            reason = option_exit_reason(pos, mark, prices[und], now, self.cfg)
+            reason = option_exit_reason(pos, mark, prices[und], now, self.cfg,
+                                        flatten_at=session_time(sch["flatten_options_at"], self.close_et))
             if reason:
                 px = self.broker.sell_option(sym, pos["qty"])
                 self._finish_exit(sym, pos, px or mark, reason, now)
