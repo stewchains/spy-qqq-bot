@@ -20,6 +20,10 @@ from bot.strategy import daily_dates, daily_with_live, evaluate  # noqa: E402
 
 ET = ZoneInfo("America/New_York")
 CFG = load_config()
+# Tests use fixed baseline strategy settings so tuning config.yaml never breaks them.
+CFG["strategy"].update({"min_score": 4, "rsi_long_range": [50, 70], "rsi_short_range": [30, 50], "min_adx": 18,
+                        "allow_shorts": True, "require_daily_trend": True, "atr_stop_mult": 1.5, "reward_risk": 2.0})
+CFG["schedule"].update({"no_entries_before": "09:45", "no_entries_after": "15:00"})
 
 
 def make_day(path, day="2026-09-28", start=600.0, vol=1e5):
