@@ -1,0 +1,13 @@
+# Secrets — never commit your API keys
+.env
+
+# Bot's own runtime files
+state.json
+trades.csv
+backtest_trades.csv
+logs/
+
+# Python
+.venv/
+__pycache__/
+*.pyc

@@ -1,0 +1,73 @@
+# =====================================================================
+#  SPY / QQQ Trading Bot — settings
+#  Edit this file to change how the bot behaves. Restart the bot after edits.
+# =====================================================================
+
+mode:
+  paper: true              # true = Alpaca paper account (fake money). Keep true until the backtest + paper results look good.
+  trade_options: true      # buy calls/puts on signals
+  trade_shares: false      # day trade SPY/QQQ shares on signals. Turn on only if backtest.py shows an edge.
+  dry_run: false           # true = analyze and log signals but never send any order (even paper)
+
+symbols: [SPY, QQQ]        # SPY tracks the S&P 500, QQQ tracks the Nasdaq-100
+
+data:
+  stock_feed: iex          # "iex" is free. "sip" needs Alpaca's paid data plan (more accurate volume).
+  options_feed: indicative # "indicative" is free (delayed-ish quotes). "opra" needs the paid plan.
+  bar_minutes: 5           # intraday candle size used for signals
+
+schedule:                  # all times are US/Eastern (market time). Oklahoma is 1 hour behind.
+  no_entries_before: "09:45"   # skip the chaotic first 15 minutes
+  no_entries_after: "15:00"
+  flatten_options_at: "15:40"  # close every bot option position before the close
+  flatten_shares_at: "15:50"   # close every bot share position (day trades never held overnight)
+  loop_seconds: 60             # how often the bot checks everything
+
+strategy:
+  min_score: 4             # signal strength needed to enter (max possible = 7). Higher = fewer, cleaner trades.
+  rsi_long_range: [50, 70] # long only when RSI is in this band (not already overbought)
+  rsi_short_range: [30, 50]
+  min_adx: 18              # trend strength filter; below this the market is chopping
+  require_daily_trend: true  # only take longs in a daily uptrend and puts in a daily downtrend (neutral allows both)
+  atr_stop_mult: 1.5       # underlying stop = entry -/+ 1.5 x ATR
+  reward_risk: 2.0         # underlying target = 2x the stop distance
+
+options:
+  min_dte: 1               # days to expiration. 0 = same-day expiry (very high risk). Default avoids 0DTE.
+  max_dte: 7
+  target_delta: 0.45       # ~0.45 = slightly out of the money, moves close to half as much as the stock
+  delta_range: [0.35, 0.60]
+  max_spread_pct: 0.06     # skip contracts whose bid/ask spread is wider than 6% of the mid price
+  min_open_interest: 500
+  take_profit_pct: 0.60    # sell at +60%
+  stop_loss_pct: 0.35      # sell at -35%
+  trail_after_pct: 0.30    # once up 30%, start trailing...
+  trail_giveback_pct: 0.20 # ...and exit if it falls 20% from its best price
+  max_hold_minutes: 120    # time stop: exit if nothing happened in 2 hours
+  limit_retries: 3         # how many times to re-price an unfilled limit order toward the ask
+
+shares:
+  use_bracket_orders: true # stop + target attached at the broker, so they work even if the bot crashes
+
+risk:
+  risk_per_trade_pct: 0.01     # max loss per trade = 1% of account
+  max_position_pct: 0.05       # never put more than 5% of the account into one options trade
+  max_share_position_pct: 0.50 # shares: max 50% of account in one position
+  daily_max_loss_pct: 0.02     # stop trading for the day after losing 2%
+  max_trades_per_day: 4
+  max_open_positions: 2
+  cooldown_after_loss_min: 20
+
+news:
+  enabled: true
+  poll_seconds: 120
+  lookback_minutes: 90     # headlines considered "current"
+  block_score: -0.5        # sentiment below this blocks new longs (and above +0.5 blocks new puts/shorts)
+  shock_pause_minutes: 15  # pause new entries after a high-impact headline (Fed, CPI, war, tariffs, halts...)
+  use_claude: false        # true = send headlines to Claude for a smarter read (needs ANTHROPIC_API_KEY in .env)
+  claude_model: claude-sonnet-4-5
+
+events:
+  file: events.yaml        # scheduled market-moving releases (CPI, jobs, Fed). No entries around them.
+  minutes_before: 15
+  minutes_after: 30
