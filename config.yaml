@@ -18,20 +18,20 @@ data:
 
 schedule:                  # all times are US/Eastern (market time). Oklahoma is 1 hour behind.
   no_entries_before: "09:45"   # skip the chaotic first 15 minutes
-  no_entries_after: "11:30"   # strict morning version (from optimize.py); was "15:00"
+  no_entries_after: "11:30"   # morning session only (from optimize.py)
   flatten_options_at: "15:40"  # close every bot option position before the close
   flatten_shares_at: "15:50"   # close every bot share position (day trades never held overnight)
   loop_seconds: 60             # how often the bot checks everything
 
 strategy:
-  min_score: 6             # signal strength needed to enter (max possible = 7). Strict version; was 4.
+  min_score: 4             # signal strength needed to enter (max possible = 7). 4 = ~1-2 trades/day; 6 = ~1/week
   rsi_long_range: [50, 70] # long only when RSI is in this band (not already overbought)
   rsi_short_range: [30, 50]
-  min_adx: 25              # trend strength filter; strong trends only (was 18)
+  min_adx: 18              # trend strength filter; below this the market is chopping
   allow_shorts: true       # false = only take long trades (calls / buying shares)
   require_daily_trend: true  # only take longs in a daily uptrend and puts in a daily downtrend (neutral allows both)
-  atr_stop_mult: 2.0       # underlying stop = entry -/+ 2 x ATR (was 1.5)
-  reward_risk: 2.0         # underlying target = 2x the stop distance
+  atr_stop_mult: 3.0       # underlying stop = entry -/+ 3 x ATR (wide, so noise doesn't stop you out)
+  reward_risk: 1.0         # underlying target = 1x the stop distance
 
 options:
   min_dte: 1               # days to expiration. 0 = same-day expiry (very high risk). Default avoids 0DTE.
