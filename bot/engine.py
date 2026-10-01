@@ -117,6 +117,7 @@ class TradingBot:
                 if not clock.is_open:
                     if traded_today and self.cfg["schedule"].get("exit_after_close", True):
                         self.reconcile()
+                        self.daily_report()
                         log.info("Market closed for the day. Bot exiting (it starts fresh next morning).")
                         return
                     self.sleep_until_open(clock)
@@ -129,6 +130,16 @@ class TradingBot:
             except Exception:  # noqa: BLE001 — keep the bot alive, log the error, try again next minute
                 log.exception("cycle error")
             time.sleep(self.cfg["schedule"]["loop_seconds"])
+
+    def daily_report(self):
+        """End-of-day report (HTML in reports/ + Discord). Never lets a report problem crash the bot."""
+        if not self.cfg.get("report", {}).get("enabled", True):
+            return
+        try:
+            from .daily_report import generate
+            generate(self.cfg, self.broker, self.state, JOURNAL)
+        except Exception:  # noqa: BLE001
+            log.exception("daily report failed")
 
     def sleep_until_open(self, clock):
         if self.state:

@@ -154,6 +154,23 @@ in `trades.csv` (opens in Excel) and the day's log in `logs/`.
 
 ---
 
+## Daily report (each bot, every trading day)
+
+Right after the market closes, each bot makes its own end-of-day report before it exits:
+
+* **On your PC:** `reports/0dte-YYYY-MM-DD.html` (account 1) and `reports/swing-YYYY-MM-DD.html` (account 2). They open in your browser automatically.
+* **On Discord:** a summary card per bot, if a webhook is in `.env`.
+
+Each report shows: account equity, today's change, realized P&L today, trades opened/closed today (with exit reasons),
+open positions with their open P&L and max loss, and all-time stats (trades, win rate, total P&L, profit factor, best/worst).
+
+**Discord setup (once):** in your server, Server Settings → Integrations → Webhooks → New Webhook → pick the channel →
+Copy Webhook URL. In `.env` add `DISCORD_WEBHOOK_URL=<the url>` (both bots post there). To send the swing bot to a
+different channel, also add `DISCORD_WEBHOOK_URL_SWING=<other url>`.
+
+Make a report any time: double-click `daily_report.bat` (both bots), or `python daily_report.py [--config config_swing.yaml]`.
+Turn parts off under `report:` in each config file.
+
 ## Optional: Claude reads the news
 Get an API key at console.anthropic.com, put it in `.env` as `ANTHROPIC_API_KEY=...`, and set
 `news.use_claude: true`. Costs are small (a short request only when new headlines arrive). If it ever
@@ -198,5 +215,7 @@ accurate signals and fills, Alpaca's paid data plan unlocks `stock_feed: sip` an
 | `backtest.py` | Tests the strategy on past data |
 | `optimize.py` | Searches for better settings, checked on unseen data |
 | `report.py` | Your performance |
+| `daily_report.py` / `daily_report.bat` / `bot/daily_report.py` | End-of-day report per bot (HTML in `reports/` + Discord) |
+| `schedule_swing_bot.bat` | One-time: creates the 8:00 AM weekday Windows task for the 30-45 day bot |
 | `bot/` | The code (strategy, news, options picker, risk, exits, broker) |
 | `tests/` | Offline tests: `python -m pip install pytest` then `python -m pytest -q` |

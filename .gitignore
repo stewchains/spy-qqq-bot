@@ -15,3 +15,4 @@ optimize_results.csv
 .venv/
 __pycache__/
 *.pyc
+reports/

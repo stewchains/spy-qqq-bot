@@ -98,3 +98,8 @@ events:
   file: events.yaml        # scheduled market-moving releases (CPI, jobs, Fed). No entries around them.
   minutes_before: 15
   minutes_after: 30
+
+report:                    # end-of-day report, made automatically right after the close
+  enabled: true
+  open_on_pc: true         # open the HTML report (reports/ folder) in your browser
+  discord: true            # post to Discord if DISCORD_WEBHOOK_URL is in .env

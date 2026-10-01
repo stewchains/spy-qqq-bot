@@ -397,3 +397,32 @@ def test_fill_missing_deltas():
     atm, otm_call, otm_put = (c["delta"] for c in chain)
     assert 0.45 < atm < 0.55
     assert 0 < otm_call < 0.2 and -0.2 < otm_put < 0
+
+
+def test_daily_report():
+    import yaml
+    from datetime import date
+    from bot.daily_report import build, discord_payload, render_html
+    sw = yaml.safe_load((Path(__file__).resolve().parent.parent / "config_swing.yaml").read_text())
+    legs = [{"symbol": "P1", "side": "sell", "type": "put", "strike": 708}, {"symbol": "P0", "side": "buy", "type": "put", "strike": 703},
+            {"symbol": "C1", "side": "sell", "type": "call", "strike": 800}, {"symbol": "C0", "side": "buy", "type": "call", "strike": 805}]
+    state = {"IC-SPY-1": {"kind": "condor", "underlying": "SPY", "qty": 2, "credit": 1.21, "legs": legs, "short_put": 708,
+                          "short_call": 800, "max_loss": 3.79, "expiration": "2026-11-20", "entry_time": "2026-10-01T10:30:00-04:00"}}
+    journal = [{"opened": "2026-10-01T10:00:00", "closed": "2026-10-01T11:00:00", "underlying": "QQQ", "qty": "3",
+                "entry": "0.31", "exit": "0.15", "pnl": "48.0", "why_out": "take profit (kept 52%)"},
+               {"opened": "2026-09-30T10:00:00", "closed": "2026-09-30T11:00:00", "underlying": "SPY", "qty": "1",
+                "entry": "1.0", "exit": "1.28", "pnl": "-28.0", "why_out": "manual"}]
+    quotes = {"P1": (0.90, 1.00), "P0": (0.40, 0.50), "C1": (0.30, 0.40), "C0": (0.10, 0.20)}  # mark 0.95-0.45+0.35-0.15 = 0.70
+    r = build(sw, {"equity": 100100.0, "last_equity": 100000.0}, state, journal, quotes, {"SPY": 760}, date(2026, 10, 1))
+    assert r["label"] == "30-45 Day Iron Condors"
+    assert r["realized_today"] == 48.0 and len(r["closed_today"]) == 1
+    assert r["open_positions"][0]["unrealized"] == round((1.21 - 0.70) * 200, 2)
+    assert r["open_positions"][0]["dte"] == 50 and r["open_positions"][0]["strikes"] == "703/708p – 800/805c"
+    assert r["all_time"]["trades"] == 2 and r["all_time"]["win_rate"] == 0.5 and r["all_time"]["pnl"] == 20.0
+    assert abs(r["day_change"] - 100) < 1e-9
+    h = render_html(r)
+    assert "30-45 Day Iron Condors" in h and "+$48.00" in h and "703/708p" in h
+    p = discord_payload(r)
+    assert len(p["embeds"][0]["fields"]) == 6 and all(len(f["value"]) <= 1024 for f in p["embeds"][0]["fields"])
+    empty = build(sw, {"equity": 1.0, "last_equity": None}, {}, [], {}, {}, date(2026, 10, 1))
+    assert "No open positions" in render_html(empty) and discord_payload(empty)
