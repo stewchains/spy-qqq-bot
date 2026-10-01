@@ -30,6 +30,8 @@ range-bound (weak trend, RSI near 50, price near its average, Bollinger Bands no
 | New trades | 8:45-10:45 CT, max 1 per symbol per day | any time 8:45 AM-2:00 PM CT, 1 open per symbol |
 | Trade log | `trades.csv` | `trades_swing.csv` |
 
+The 30-45 day bot trades a **separate paper account** (`alpaca_keys: SWING` in `config_swing.yaml`, keys `ALPACA_API_KEY_SWING` / `ALPACA_SECRET_KEY_SWING` in `.env`). To close every condor a bot holds: stop it, then run `close_swing_condors.bat` (or `python close_condors.py`).
+
 Both bots size each condor so the **maximum possible loss is 1% of the account**, and both can run at the
 same time (each has its own state file, log, and trade journal). `python report.py trades_swing.csv`
 shows the 30-45 day bot's results. The old call/put momentum strategy is still available: set
@@ -190,6 +192,7 @@ accurate signals and fills, Alpaca's paid data plan unlocks `stock_feed: sip` an
 | `events.yaml` | CPI / jobs / Fed dates — add 2027 dates when published |
 | `run_bot.py` | Starts the 0DTE bot (`--config config_swing.yaml` for the 30-45 day bot) |
 | `start_bot_swing.bat` / `config_swing.yaml` | The 30-45 day iron condor bot |
+| `close_condors.py` / `close_swing_condors.bat` | Close all condors a bot is holding |
 | `bot/condor.py` | Iron condor logic (range filter, strike picking, exits, sizing) |
 | `check_setup.py` | Tests your setup, no trading |
 | `backtest.py` | Tests the strategy on past data |

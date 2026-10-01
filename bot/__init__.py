@@ -14,15 +14,17 @@ def load_config(path: str | None = None) -> dict:
     return yaml.safe_load(Path(path or ROOT / "config.yaml").read_text())
 
 
-def load_keys():
+def load_keys(suffix: str | None = None):
+    """suffix='SWING' reads ALPACA_API_KEY_SWING / ALPACA_SECRET_KEY_SWING (a second account)."""
     try:
         from dotenv import load_dotenv
         load_dotenv(ROOT / ".env")
     except ImportError:
         pass
-    key, secret = os.getenv("ALPACA_API_KEY"), os.getenv("ALPACA_SECRET_KEY")
+    sfx = f"_{suffix.upper()}" if suffix else ""
+    key, secret = os.getenv(f"ALPACA_API_KEY{sfx}"), os.getenv(f"ALPACA_SECRET_KEY{sfx}")
     if not key or not secret or "your_" in key:
-        raise SystemExit("Missing Alpaca keys. Copy .env.example to .env and paste your keys (see README).")
+        raise SystemExit(f"Missing Alpaca keys ALPACA_API_KEY{sfx} / ALPACA_SECRET_KEY{sfx} in .env (see README).")
     return key, secret
 
 

@@ -6,6 +6,7 @@
 
 bot_name: swing           # keeps its own state_swing.json, trades_swing.csv and logs/bot-swing-*.log
 lock_port: 47824          # lets this bot run alongside the 0DTE bot
+alpaca_keys: SWING        # uses the SECOND paper account: ALPACA_API_KEY_SWING / ALPACA_SECRET_KEY_SWING in .env
 
 mode:
   paper: true              # true = Alpaca paper account (fake money). Keep true until the backtest + paper results look good.

@@ -23,7 +23,7 @@ def main():
         sys.exit(0)
     setup_logging(name)
     engine.use_bot_files(name)
-    key, secret = load_keys()
+    key, secret = load_keys(cfg.get("alpaca_keys"))
     if not cfg["mode"]["paper"] and os.getenv("I_ACCEPT_LIVE_TRADING") != "YES":
         sys.exit("config has paper: false (REAL MONEY). To confirm, set I_ACCEPT_LIVE_TRADING=YES in .env "
                  "and use your LIVE api keys. See README 'Going live'.")
