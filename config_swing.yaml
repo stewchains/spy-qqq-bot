@@ -45,12 +45,13 @@ condor:                    # 30-45 day iron condors (tastytrade method + Cboe CN
   target_dte: 45           # open the expiration closest to 45 days out...
   min_dte: 30              # ...within 30-45 days
   max_dte: 45
-  chain_pct: 0.12          # look at strikes within +/-12% of the price
+  chain_pct: 0.15          # look at strikes within +/-15% of the price
   short_delta: 0.16        # sell ~16-delta put and call (~1 standard deviation; tastytrade standard)
   short_delta_range: [0.12, 0.20]
   wing_width: 5.0          # $5 wings on SPY/QQQ (~50 SPX points)
   min_credit_pct: 0.20     # skip unless credit >= 20% of wing width ($1.00 on $5 wings)
-  max_leg_spread: 0.15     # skip short strikes whose bid/ask spread is wider than 15 cents
+  max_leg_spread: 0.15     # short strikes: bid/ask spread must be under $0.15...
+  max_leg_spread_pct: 0.20 # ...or under 20% of the option's price, whichever is looser
   take_profit_pct: 0.50    # buy back once 50% of the credit is kept (tastytrade)
   stop_loss_mult: 1.0      # buy back if the loss reaches 1x the credit (cost to close = 2x credit)
   close_at_dte: 21         # close at 21 days to expiration no matter what (tastytrade)

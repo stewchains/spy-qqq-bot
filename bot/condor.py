@@ -47,24 +47,34 @@ def pick_condor(chain: list[dict], spot: float, cfg: dict) -> tuple[dict | None,
     Returns (condor dict or None, reason)."""
     k = cfg["condor"]
     lo, hi = k["short_delta_range"]
-    quoted = [c for c in chain if c.get("bid", 0) > 0 and c.get("ask", 0) >= c.get("bid", 0)]
+    # long wings only need an ask (far-out options often show a $0 bid); shorts need a real two-sided quote
+    quoted = [c for c in chain if c.get("ask", 0) > 0 and c.get("ask", 0) >= c.get("bid", 0)]
     puts = sorted([c for c in quoted if c["type"] == "put"], key=lambda c: c["strike"])
     calls = sorted([c for c in quoted if c["type"] == "call"], key=lambda c: c["strike"])
+    pct = k.get("max_leg_spread_pct", 0.0)
+
+    def tight(c):
+        return (c["ask"] - c["bid"]) <= max(k["max_leg_spread"], pct * _mid(c))
 
     def best_short(side_list, otm):
-        cands = [c for c in side_list if otm(c) and c.get("delta") is not None and lo <= abs(c["delta"]) <= hi
-                 and (c["ask"] - c["bid"]) <= k["max_leg_spread"]]
+        cands = [c for c in side_list if otm(c) and c["bid"] > 0 and c.get("delta") is not None
+                 and lo <= abs(c["delta"]) <= hi and tight(c)]
         return min(cands, key=lambda c: abs(abs(c["delta"]) - k["short_delta"])) if cands else None
 
     sp = best_short(puts, lambda c: c["strike"] < spot)
     sc = best_short(calls, lambda c: c["strike"] > spot)
     if not sp or not sc:
-        return None, "no short strike with the right delta / tight enough spread"
+        side = "put" if not sp else "call"
+        near = [c for c in (puts if side == "put" else calls) if c.get("delta") is not None and lo <= abs(c["delta"]) <= hi]
+        detail = (f"{len(near)} {side}s in the delta range, tightest spread "
+                  f"${min(c['ask'] - c['bid'] for c in near):.2f}") if near else f"no {side}s in the delta range"
+        return None, f"no short {side} with the right delta / tight enough spread ({detail})"
     # wings: nearest strike at least `wing_width` further out
     lp = max((c for c in puts if c["strike"] <= sp["strike"] - k["wing_width"]), key=lambda c: c["strike"], default=None)
     lc = min((c for c in calls if c["strike"] >= sc["strike"] + k["wing_width"]), key=lambda c: c["strike"], default=None)
     if not lp or not lc:
-        return None, "no wing strikes available"
+        return None, (f"no {'put' if not lp else 'call'} wing ${k['wing_width']:g} beyond the short strike "
+                      f"(short put {sp['strike']:g}, short call {sc['strike']:g})")
     credit = _mid(sp) + _mid(sc) - _mid(lp) - _mid(lc)
     width = max(sp["strike"] - lp["strike"], lc["strike"] - sc["strike"])
     if credit < k["min_credit_pct"] * width:

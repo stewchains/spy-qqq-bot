@@ -42,7 +42,8 @@ condor:                    # same-day (0DTE) iron condors on SPY / QQQ — see R
   short_delta_range: [0.08, 0.18]
   wing_width: 3.0          # $ between short and long strikes (~30 SPX points, as in the studies)
   min_credit_pct: 0.10     # skip unless total credit >= 10% of wing width ($0.30 on $3 wings)
-  max_leg_spread: 0.10     # skip short strikes whose bid/ask spread is wider than 10 cents
+  max_leg_spread: 0.10     # short strikes: bid/ask spread must be under $0.10...
+  max_leg_spread_pct: 0.15 # ...or under 15% of the option's price, whichever is looser
   take_profit_pct: 0.50    # buy back once 50% of the credit is kept
   stop_loss_mult: 1.0      # buy back if the loss reaches 1x the credit (cost to close = 2x credit)
   breach_buffer_pct: 0.0005  # also close if price comes within 0.05% of a short strike
