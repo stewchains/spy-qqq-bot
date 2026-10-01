@@ -18,7 +18,7 @@ data:
 
 schedule:                  # all times are US/Eastern (market time). Oklahoma is 1 hour behind.
   no_entries_before: "09:45"   # skip the chaotic first 15 minutes
-  no_entries_after: "11:45"   # last new trade at 11:45 ET = 10:45 CT
+  no_entries_after: "14:00"   # new condors until 2:00 PM ET (1:00 CT); positions are held until time_exit
   flatten_options_at: "15:40"  # close every bot option position before the close
   flatten_shares_at: "15:50"   # close every bot share position (day trades never held overnight)
   loop_seconds: 60             # how often the bot checks everything
@@ -47,7 +47,8 @@ condor:                    # same-day (0DTE) iron condors on SPY / QQQ — see R
   take_profit_pct: 0.50    # buy back once 50% of the credit is kept
   stop_loss_mult: 1.0      # buy back if the loss reaches 1x the credit (cost to close = 2x credit)
   breach_buffer_pct: 0.0005  # also close if price comes within 0.05% of a short strike
-  time_exit: "15:00"       # ET (2:00 PM CT). Alpaca needs expiring-option orders in before 3:15 PM ET.
+  time_exit: "15:10"       # hold to the close as far as Alpaca allows: 3:10 PM ET (2:10 CT). Alpaca rejects
+                           # orders on expiring options after 3:15 PM ET and force-sells them from 3:30 PM ET.
   max_per_symbol_per_day: 1  # 1 condor per symbol per day -> up to 2 trades a day (SPY + QQQ)
   max_contracts: 10
   limit_retries: 3         # re-price the order toward the natural price this many times if unfilled
