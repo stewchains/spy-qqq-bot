@@ -26,13 +26,14 @@ def load_keys():
     return key, secret
 
 
-def setup_logging():
+def setup_logging(name: str | None = None):
     logs = ROOT / "logs"
     logs.mkdir(exist_ok=True)
+    prefix = f"bot-{name}" if name else "bot"
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)-7s %(name)-6s %(message)s", datefmt="%H:%M:%S",
         handlers=[logging.StreamHandler(),
-                  logging.FileHandler(logs / f"bot-{datetime.now():%Y-%m-%d}.log", encoding="utf-8")])
+                  logging.FileHandler(logs / f"{prefix}-{datetime.now():%Y-%m-%d}.log", encoding="utf-8")])
     for noisy in ("urllib3", "websockets", "alpaca"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 

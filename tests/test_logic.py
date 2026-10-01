@@ -294,3 +294,92 @@ def test_half_day_flatten_times():
            "entry_time": datetime(2026, 11, 27, 10, 0, tzinfo=ET).isoformat(), "expiration": "2026-12-04"}
     now = datetime(2026, 11, 27, 12, 45, tzinfo=ET)
     assert "end-of-day" in option_exit_reason(dict(pos), 2.0, 600, now, CFG, flatten_at=session_time("15:40", half))
+
+
+# ----------------------------------------------------------------------------- iron condor
+def _chain(spot=600.0):
+    """Synthetic 0DTE chain: delta falls off with distance from spot."""
+    out = []
+    for k in range(int(spot) - 15, int(spot) + 16):
+        d = max(0.01, 0.5 - abs(k - spot) * 0.05)
+        prem = round(max(0.02, d * 2.4), 2)
+        typ_put = k < spot
+        for typ in ("put", "call"):
+            otm = (typ == "put" and k < spot) or (typ == "call" and k > spot)
+            delta = d if otm else 1 - d
+            px = prem if otm else round(prem + abs(k - spot), 2)
+            out.append({"symbol": f"SPY{typ[0].upper()}{k}", "type": typ, "strike": float(k),
+                        "delta": -delta if typ == "put" else delta, "bid": px, "ask": round(px + 0.02, 2)})
+    return out
+
+
+def test_condor_pick_strikes_and_credit():
+    from bot.condor import pick_condor
+    c, msg = pick_condor(_chain(), 600.0, CFG)
+    assert c, msg
+    assert c["long_put"] < c["short_put"] < 600 < c["short_call"] < c["long_call"]
+    assert c["short_put"] - c["long_put"] >= CFG["condor"]["wing_width"]
+    assert c["credit_mid"] > 0 and abs(c["max_loss"] - (c["width"] - c["credit_mid"])) < 0.011
+    assert [l["side"] for l in c["legs"]] == ["sell", "buy", "sell", "buy"]
+
+
+def test_condor_rejects_thin_credit():
+    from bot.condor import pick_condor
+    cheap = [{**x, "bid": 0.01, "ask": 0.02} for x in _chain()]
+    c, msg = pick_condor(cheap, 600.0, CFG)
+    assert c is None and "credit" in msg
+
+
+def test_condor_mark_and_exits():
+    from datetime import time as dtime
+    from bot.condor import condor_exit_reason, condor_mark
+    legs = [{"symbol": "a", "side": "sell"}, {"symbol": "b", "side": "buy"},
+            {"symbol": "c", "side": "sell"}, {"symbol": "d", "side": "buy"}]
+    q = {"a": (0.30, 0.32), "b": (0.05, 0.07), "c": (0.30, 0.32), "d": (0.05, 0.07)}
+    assert abs(condor_mark(legs, q) - 0.50) < 1e-9
+    pos = {"credit": 0.50, "short_put": 595, "short_call": 605}
+    now = datetime(2026, 10, 2, 11, 0, tzinfo=ET)
+    t = dtime(15, 0)
+    assert condor_exit_reason(pos, 0.45, 600, now, CFG, t) is None
+    assert "take profit" in condor_exit_reason(pos, 0.24, 600, now, CFG, t)
+    assert "stop loss" in condor_exit_reason(pos, 1.01, 600, now, CFG, t)
+    assert "short put" in condor_exit_reason(pos, 0.60, 595.1, now, CFG, t)
+    assert "short call" in condor_exit_reason(pos, 0.60, 604.9, now, CFG, t)
+    assert "time exit" in condor_exit_reason(pos, 0.40, 600, now.replace(hour=15, minute=1), CFG, t)
+
+
+def test_condor_sizing():
+    from bot.condor import condor_contracts
+    # $100k x 1% = $1,000 risk; max loss $2.60/condor = $260 -> 3 condors
+    assert condor_contracts(100000, 2.60, CFG) == 3
+    assert condor_contracts(100000, 0.10, CFG) == CFG["condor"]["max_contracts"]
+    assert condor_contracts(1000, 2.60, CFG) == 0
+
+
+def test_range_filter():
+    from bot.condor import range_filter
+    calm = make_day(list(np.random.default_rng(1).normal(0, 0.15, 60)))  # chop around one price (seed 1 = calm)
+    ok, why = range_filter(add_all(calm), CFG)
+    assert ok, why
+    trend = make_day(list(np.linspace(0, 6, 60)))               # steady run-up
+    ok, why = range_filter(add_all(trend), CFG)
+    assert not ok and any("ADX" in w or "RSI" in w or "VWAP" in w for w in why), why
+
+
+def test_swing_condor_expiry_and_dte_exit():
+    import copy
+    import yaml
+    from datetime import date, time as dtime
+    from bot.condor import choose_expiry, condor_exit_reason
+    sw = yaml.safe_load((Path(__file__).resolve().parent.parent / "config_swing.yaml").read_text())
+    today = date(2026, 10, 2)
+    exps = [today + timedelta(days=d) for d in (7, 24, 31, 38, 44, 52)]
+    assert choose_expiry(exps, today, sw) == today + timedelta(days=44)
+    assert choose_expiry([today + timedelta(days=60)], today, sw) is None
+    pos = {"credit": 1.50, "short_put": 570, "short_call": 630, "expiration": (today + timedelta(days=30)).isoformat()}
+    now = datetime(2026, 10, 2, 11, 0, tzinfo=ET)
+    assert condor_exit_reason(pos, 1.40, 569, now, sw, None) is None          # no breach exit in swing mode
+    assert "take profit" in condor_exit_reason(pos, 0.70, 600, now, sw, None)
+    later = now + timedelta(days=9)                                            # 21 DTE
+    assert "days to expiration" in condor_exit_reason(pos, 1.40, 600, later, sw, None)
+    assert sw["bot_name"] == "swing" and sw["lock_port"] != CFG.get("lock_port", 47823)

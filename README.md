@@ -10,6 +10,44 @@ day trade the shares, but that's **off** until the backtest shows it's worth it.
 
 ---
 
+## Current strategy: iron condors (two bots)
+
+The bot now sells **iron condors** on SPY and QQQ: it sells an out-of-the-money put and call, and buys a
+further-out put and call ("wings") so the most it can lose is capped. It makes money when the price stays
+between the two short strikes. **Technical analysis decides when** to open one: only when the chart looks
+range-bound (weak trend, RSI near 50, price near its average, Bollinger Bands not expanding).
+
+| | **0DTE bot** (`start_bot.bat`, `config.yaml`) | **30-45 day bot** (`start_bot_swing.bat`, `config_swing.yaml`) |
+|---|---|---|
+| Expiration | same day | closest to 45 days out (30-45) |
+| Short strikes | ~12 delta | ~16 delta |
+| Wings | $3 | $5 |
+| Minimum credit | 10% of wing width | 20% of wing width |
+| Chart used for the range filter | 5-minute (VWAP) | daily (21-day EMA) |
+| Take profit | 50% of credit | 50% of credit |
+| Stop loss | loss = 1x credit | loss = 1x credit |
+| Other exits | price touches a short strike; 2:00 PM CT time exit | close at 21 days to expiration |
+| New trades | 8:45-10:45 CT, max 1 per symbol per day | any time 8:45 AM-2:00 PM CT, 1 open per symbol |
+| Trade log | `trades.csv` | `trades_swing.csv` |
+
+Both bots size each condor so the **maximum possible loss is 1% of the account**, and both can run at the
+same time (each has its own state file, log, and trade journal). `python report.py trades_swing.csv`
+shows the 30-45 day bot's results. The old call/put momentum strategy is still available: set
+`strategy: type: directional` in `config.yaml`.
+
+**Important:** the backtest/optimize scripts only test the old momentum strategy. Iron condors can't be
+backtested accurately with free data, so paper trading is the real test.
+
+### Iron condor research (what the settings are based on)
+- **Tastytrade "standard" (45 DTE):** sell ~16-20 delta, take profit at 50% of credit, close at 21 DTE. ([Option Alpha](https://optionalpha.com/videos/tastys-best-practices-iron-condor-automated))
+- **Cboe CNDR index** (sells ~20-delta / buys ~5-delta monthly SPX condors, held to expiry): max drawdown 19% vs 51% for the S&P 500 over 35 years, but much lower returns. ([Cboe](https://www.cboe.com/insights/posts/benchmark-indices-series-volatility-management-with-cboes-bfly-and-cndr-indices/))
+- **Spintwig (independent backtests, 2007-2023):** SPX condors held to expiry and opened every day did poorly (7-DTE 10/5-delta: Sharpe 0.17, -46% max drawdown); entering only when options were "overpriced" improved this to Sharpe 0.48 / -26%. Both trailed simply holding SPY on total return. ([Spintwig](https://spintwig.com/short-spx-iron-condor-7-dte-s1-signal-options-backtest/))
+- **OptionsPilot (vendor backtest, 15,000+ SPX trades 2006-2025):** 16-delta / 45-DTE / 50% profit target was best: 74.6% win rate, Sharpe 0.78, -21% max drawdown, but only ~5-8% a year at 2-3% risk per trade. Treat vendor numbers with caution. ([OptionsPilot](https://optionspilot.app/blog/best-delta-dte-settings-iron-condors-backtest-data))
+- **0DTE practitioner results (Theta Profits, 9,100 trades 2021-2026):** 10-15 delta shorts, ~30-point SPX wings, stop on each side about equal to the total credit; only 40% winners but 49 of 57 months profitable. Self-reported. ([Theta Profits](https://www.thetaprofits.com/my-most-profitable-options-trading-strategy-0dte-breakeven-iron-condor/))
+- **0DTE risk warning:** frequent small wins and occasional large losses (losses ~2x the size of wins); suggests 50% profit targets, a time exit, and capping daily losses. ([FatTail](https://fattail.ai/0dte-iron-condor/)) A one-year 2022 0DTE backtest (14 delta, 35-pt wings) had an 82.7% win rate but average losses twice the average win and a -28% drawdown. ([OptionsTradingIQ](https://optionstradingiq.com/option-omega/))
+- **Technical filters (ADX, RSI, Bollinger Bands):** widely recommended for picking range-bound days, but no credible published study gives numbers for how much they help.
+
+
 ## What it does every minute (9:30–4:00 ET)
 
 1. **News**: pulls headlines for SPY, QQQ, and the mega-caps that drive them (AAPL, MSFT, NVDA, AMZN,
@@ -150,7 +188,9 @@ accurate signals and fills, Alpaca's paid data plan unlocks `stock_feed: sip` an
 |---|---|
 | `config.yaml` | All settings |
 | `events.yaml` | CPI / jobs / Fed dates — add 2027 dates when published |
-| `run_bot.py` | Starts the bot |
+| `run_bot.py` | Starts the 0DTE bot (`--config config_swing.yaml` for the 30-45 day bot) |
+| `start_bot_swing.bat` / `config_swing.yaml` | The 30-45 day iron condor bot |
+| `bot/condor.py` | Iron condor logic (range filter, strike picking, exits, sizing) |
 | `check_setup.py` | Tests your setup, no trading |
 | `backtest.py` | Tests the strategy on past data |
 | `optimize.py` | Searches for better settings, checked on unseen data |

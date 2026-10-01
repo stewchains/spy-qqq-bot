@@ -71,4 +71,8 @@ def add_all(df: pd.DataFrame) -> pd.DataFrame:
     df["adx"] = adx(df)
     df["vwap"] = session_vwap(df)
     df["vol_avg"] = df["volume"].rolling(20, min_periods=5).mean()
+    # Bollinger Band width vs its recent normal: >1 means volatility is expanding (bad for condors)
+    sma = df["close"].rolling(20, min_periods=10).mean()
+    bbw = 4 * df["close"].rolling(20, min_periods=10).std() / sma
+    df["bb_ratio"] = (bbw / bbw.rolling(50, min_periods=10).median()).fillna(1.0)
     return df

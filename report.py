@@ -1,9 +1,12 @@
-"""Performance report from trades.csv:  python report.py"""
+"""Performance report:
+    python report.py                    # 0DTE bot (trades.csv)
+    python report.py trades_swing.csv   # 30-45 day bot"""
+import sys
 from pathlib import Path
 
 import pandas as pd
 
-f = Path(__file__).parent / "trades.csv"
+f = Path(__file__).parent / (sys.argv[1] if len(sys.argv) > 1 else "trades.csv")
 if not f.exists():
     raise SystemExit("No trades yet.")
 t = pd.read_csv(f, parse_dates=["opened", "closed"])

@@ -1,7 +1,11 @@
 # =====================================================================
-#  SPY / QQQ Trading Bot — settings
+#  SPY / QQQ 30-45 DAY IRON CONDOR BOT — settings
+#  Start with:  python run_bot.py --config config_swing.yaml   (or double-click start_bot_swing.bat)
 #  Edit this file to change how the bot behaves. Restart the bot after edits.
 # =====================================================================
+
+bot_name: swing           # keeps its own state_swing.json, trades_swing.csv and logs/bot-swing-*.log
+lock_port: 47824          # lets this bot run alongside the 0DTE bot
 
 mode:
   paper: true              # true = Alpaca paper account (fake money). Keep true until the backtest + paper results look good.
@@ -18,7 +22,7 @@ data:
 
 schedule:                  # all times are US/Eastern (market time). Oklahoma is 1 hour behind.
   no_entries_before: "09:45"   # skip the chaotic first 15 minutes
-  no_entries_after: "11:45"   # last new trade at 11:45 ET = 10:45 CT
+  no_entries_after: "15:00"   # can open a new condor any time 9:45 AM - 3:00 PM ET
   flatten_options_at: "15:40"  # close every bot option position before the close
   flatten_shares_at: "15:50"   # close every bot share position (day trades never held overnight)
   loop_seconds: 60             # how often the bot checks everything
@@ -36,25 +40,31 @@ strategy:
   atr_stop_mult: 3.0       # underlying stop = entry -/+ 3 x ATR (wide, so noise doesn't stop you out)
   reward_risk: 1.0         # underlying target = 1x the stop distance
 
-condor:                    # same-day (0DTE) iron condors on SPY / QQQ — see README "Iron condor research"
-  mode: 0dte               # opened and closed the same day
-  short_delta: 0.12        # sell ~12-delta put and call (0DTE studies use 10-15 delta)
-  short_delta_range: [0.08, 0.18]
-  wing_width: 3.0          # $ between short and long strikes (~30 SPX points, as in the studies)
-  min_credit_pct: 0.10     # skip unless total credit >= 10% of wing width ($0.30 on $3 wings)
-  max_leg_spread: 0.10     # skip short strikes whose bid/ask spread is wider than 10 cents
-  take_profit_pct: 0.50    # buy back once 50% of the credit is kept
+condor:                    # 30-45 day iron condors (tastytrade method + Cboe CNDR index) — see README
+  mode: swing              # hold for days/weeks; NOT closed at the end of each day
+  target_dte: 45           # open the expiration closest to 45 days out...
+  min_dte: 30              # ...within 30-45 days
+  max_dte: 45
+  chain_pct: 0.12          # look at strikes within +/-12% of the price
+  short_delta: 0.16        # sell ~16-delta put and call (~1 standard deviation; tastytrade standard)
+  short_delta_range: [0.12, 0.20]
+  wing_width: 5.0          # $5 wings on SPY/QQQ (~50 SPX points)
+  min_credit_pct: 0.20     # skip unless credit >= 20% of wing width ($1.00 on $5 wings)
+  max_leg_spread: 0.15     # skip short strikes whose bid/ask spread is wider than 15 cents
+  take_profit_pct: 0.50    # buy back once 50% of the credit is kept (tastytrade)
   stop_loss_mult: 1.0      # buy back if the loss reaches 1x the credit (cost to close = 2x credit)
-  breach_buffer_pct: 0.0005  # also close if price comes within 0.05% of a short strike
-  time_exit: "15:00"       # ET (2:00 PM CT). Alpaca needs expiring-option orders in before 3:15 PM ET.
-  max_per_symbol_per_day: 1  # 1 condor per symbol per day -> up to 2 trades a day (SPY + QQQ)
+  close_at_dte: 21         # close at 21 days to expiration no matter what (tastytrade)
+  breach_buffer_pct: null  # no "touched the short strike" exit for longer-dated condors
+  time_exit: null          # no daily close-out
+  max_per_symbol_per_day: 1  # and only 1 open condor per symbol at a time
   max_contracts: 10
-  limit_retries: 3         # re-price the order toward the natural price this many times if unfilled
-  ta:                      # technical filter: only open when the 5-min chart looks range-bound
-    max_adx: 25            # weak trend
-    rsi_range: [40, 60]    # momentum near neutral
-    max_vwap_dist_atr: 1.0 # price within 1 ATR of VWAP
-    max_bb_expansion: 1.3  # Bollinger Band width not more than 1.3x its recent normal
+  limit_retries: 3
+  ta:                      # technical filter on DAILY candles: only open when the market is range-bound
+    anchor: ema21          # measure distance from the 21-day EMA
+    max_adx: 25            # weak trend on the daily chart
+    rsi_range: [40, 60]    # daily momentum near neutral
+    max_vwap_dist_atr: 1.5 # price within 1.5 daily ATRs of the 21-day EMA
+    max_bb_expansion: 1.3  # daily Bollinger width not expanding
 
 options:
   min_dte: 1               # days to expiration. 0 = same-day expiry (very high risk). Default avoids 0DTE.

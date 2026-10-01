@@ -10,11 +10,14 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from .broker import Broker
+from .condor import (choose_expiry, condor_contracts, condor_exit_reason, condor_mark, pick_condor,
+                     range_filter)
 from .events import EventCalendar
 from .exits import option_exit_reason, session_time, _t
 from .news import NewsMonitor
 from .options_selector import pick_contract
 from .risk import RiskManager
+from .indicators import add_all
 from .strategy import daily_with_live, evaluate
 
 ET = ZoneInfo("America/New_York")
@@ -24,6 +27,14 @@ STATE = ROOT / "state.json"
 JOURNAL = ROOT / "trades.csv"
 JOURNAL_COLS = ["opened", "closed", "kind", "symbol", "underlying", "direction", "qty", "entry", "exit",
                 "pnl", "pnl_pct", "why_in", "why_out"]
+
+
+def use_bot_files(name: str | None):
+    """Each bot (e.g. the 0DTE bot and the 30-45 day bot) keeps its own state and trade journal."""
+    global STATE, JOURNAL
+    suffix = f"_{name}" if name else ""
+    STATE = ROOT / f"state{suffix}.json"
+    JOURNAL = ROOT / f"trades{suffix}.csv"
 
 
 class TradingBot:
@@ -39,12 +50,16 @@ class TradingBot:
         self._last_signal_log: dict = {}
         self._last_exit: dict = {}
         self.close_et = None  # today's market close (earlier on half days)
+        self._condors_today: dict = {}
+        self.condor_mode = cfg["strategy"].get("type", "directional") == "iron_condor"
 
     # ------------------------------------------------------------------ persistence
     def save(self):
         STATE.write_text(json.dumps(self.state, indent=2, default=str))
 
     def journal(self, pos: dict, sym: str, exit_px: float, why_out: str, now: datetime):
+        if pos["kind"] == "condor":
+            return self._journal_condor(pos, sym, exit_px, why_out, now)
         mult = 100 if pos["kind"] == "option" else 1
         sign = 1 if (pos["kind"] == "option" or pos["direction"] == "long") else -1
         pnl = (exit_px - pos["entry_price"]) * pos["qty"] * mult * sign if exit_px else 0.0
@@ -58,6 +73,22 @@ class TradingBot:
                         round(sign * (exit_px / pos["entry_price"] - 1), 4) if exit_px else "", pos.get("why", ""), why_out])
         log.info("CLOSED %s %s x%s  entry %.2f exit %.2f  P&L $%.2f  (%s)", pos["kind"], sym, pos["qty"],
                  pos["entry_price"], exit_px, pnl, why_out)
+        self.risk.record_close(pnl, now)
+
+    def _journal_condor(self, pos, sym, debit, why_out, now):
+        """Condor P&L = (credit received - debit paid to close) x 100 x qty."""
+        pnl = (pos["credit"] - debit) * 100 * pos["qty"]
+        new = not JOURNAL.exists()
+        with JOURNAL.open("a", newline="") as f:
+            w = csv.writer(f)
+            if new:
+                w.writerow(JOURNAL_COLS)
+            w.writerow([pos["entry_time"], now.isoformat(timespec="seconds"), "condor", sym, pos["underlying"],
+                        "neutral", pos["qty"], pos["credit"], debit, round(pnl, 2),
+                        round((pos["credit"] - debit) / pos["max_loss"], 4) if pos.get("max_loss") else "",
+                        pos.get("why", ""), why_out])
+        log.info("CLOSED condor %s x%s  credit %.2f  closed for %.2f  P&L $%.2f  (%s)", sym, pos["qty"],
+                 pos["credit"], debit, pnl, why_out)
         self.risk.record_close(pnl, now)
 
     # ------------------------------------------------------------------ main loop
@@ -101,11 +132,22 @@ class TradingBot:
         live = self.broker.positions()
         now = datetime.now(ET)
         for sym in list(self.state):
+            pos = self.state[sym]
+            if pos["kind"] == "condor":
+                held = [l["symbol"] for l in pos["legs"] if l["symbol"] in live]
+                if not held:
+                    self.state.pop(sym)
+                    self.journal(pos, sym, 0.0, "closed at broker (expired worthless, liquidated, or manual) — "
+                                 "check Alpaca for the exact price", now)
+                elif len(held) < 4:
+                    self._note(f"partial-{sym}", f"WARNING {sym}: only {len(held)} of 4 legs still open at Alpaca")
+                continue
             if sym not in live:
                 pos = self.state.pop(sym)
                 px = self.broker.last_exit_price(sym)
                 self.journal(pos, sym, px, "closed at broker (bracket stop/target, expiry, or manual)", now)
-        others = [s for s in live if s not in self.state]
+        tracked = set(self.state) | {l["symbol"] for p in self.state.values() if p["kind"] == "condor" for l in p["legs"]}
+        others = [s for s in live if s not in tracked]
         if others:
             self._note("others", "Ignoring positions the bot didn't open: " + ", ".join(others))
         self.save()
@@ -139,7 +181,10 @@ class TradingBot:
             last = self._last_exit.get(sym)
             if last and (now - last).total_seconds() < 600:  # no instant re-entry after an exit
                 continue
-            self.try_entry(sym, now, acct)
+            if self.condor_mode:
+                self.try_condor(sym, now, acct)
+            else:
+                self.try_entry(sym, now, acct)
             ok, _ = self.risk.can_open(now, self.broker.account()["equity"], len(self.state))
             if not ok:
                 break
@@ -197,6 +242,55 @@ class TradingBot:
                     self.risk.record_open(); self.save()
                     log.info("OPENED %s %d shares @ %.2f stop %.2f target %.2f", sig.direction, qty, px, sig.stop, sig.target)
 
+    def try_condor(self, sym: str, now: datetime, acct: dict):
+        k = self.cfg["condor"]
+        key = (now.date(), sym)
+        if self._condors_today.get(key, 0) >= k["max_per_symbol_per_day"]:
+            return self._note(f"cnt-{sym}", f"{sym}: already traded {k['max_per_symbol_per_day']} condor(s) today")
+        swing = k.get("mode", "0dte") == "swing"
+        df = self.broker.daily(sym) if swing else self.broker.bars(sym, self.cfg["data"]["bar_minutes"], days=5)
+        if df.empty:
+            return
+        df = add_all(df)
+        ok, reasons = range_filter(df, self.cfg)
+        self._note(f"sig-{sym}", f"[{now:%H:%M}] {sym}: {'RANGE-BOUND' if ok else 'no condor'} ({'; '.join(reasons)})")
+        if not ok:
+            return
+        spot = self.broker.last_price(sym)
+        if swing:
+            exps = self.broker.expirations(sym, now.date() + timedelta(days=k["min_dte"]),
+                                           now.date() + timedelta(days=k["max_dte"]), spot)
+            expiry = choose_expiry(exps, now.date(), self.cfg)
+            if not expiry:
+                return self._note(f"chain-{sym}", f"{sym}: no expiration {k['min_dte']}-{k['max_dte']} days out")
+        else:
+            expiry = now.date()
+        chain = self.broker.chain_for_expiry(sym, spot, expiry, pct=k.get("chain_pct", 0.05))
+        if not chain:
+            return self._note(f"chain-{sym}", f"{sym}: no options for {expiry}")
+        condor, msg = pick_condor(chain, spot, self.cfg)
+        log.info("%s condor pick: %s", sym, msg)
+        if not condor:
+            return
+        qty = condor_contracts(acct["equity"], condor["max_loss"], self.cfg)
+        if qty < 1:
+            return log.info("%s: position size rounds to 0 condors — skipping", sym)
+        min_credit = k["min_credit_pct"] * condor["width"]
+        filled, credit = self.broker.open_condor(condor, qty, k["limit_retries"], min_credit)
+        if not filled:
+            return log.info("%s: condor order didn't fill — skipped", sym)
+        cid = f"IC-{sym}-{now:%Y%m%d-%H%M}"
+        self.state[cid] = {
+            "kind": "condor", "underlying": sym, "direction": "neutral", "qty": filled, "credit": round(credit, 2),
+            "entry_price": round(credit, 2), "legs": condor["legs"], "short_put": condor["short_put"],
+            "short_call": condor["short_call"], "width": condor["width"],
+            "max_loss": round(condor["width"] - credit, 2), "expiration": expiry.isoformat(),
+            "entry_time": now.isoformat(timespec="seconds"), "why": "; ".join(reasons) + f" | {msg}"}
+        self._condors_today[key] = self._condors_today.get(key, 0) + 1
+        self.risk.record_open(); self.save()
+        log.info("OPENED %d iron condor(s) on %s for $%.2f credit each (max loss $%.0f total) | %s",
+                 filled, sym, credit, (condor["width"] - credit) * 100 * filled, msg)
+
     # ------------------------------------------------------------------ exits
     def manage_exits(self, now: datetime):
         sch = self.cfg["schedule"]
@@ -208,6 +302,24 @@ class TradingBot:
                     prices[und] = self.broker.last_price(und)
                 except Exception:  # noqa: BLE001
                     prices[und] = 0.0
+            if pos["kind"] == "condor":
+                q = self.broker.quotes([l["symbol"] for l in pos["legs"]])
+                if any(q.get(l["symbol"], (0, 0))[1] <= 0 for l in pos["legs"]):
+                    continue  # missing quote this minute — check again next cycle
+                mark = condor_mark(pos["legs"], q)
+                te = self.cfg["condor"].get("time_exit")
+                t_exit = session_time(te, self.close_et) if te else None
+                reason = condor_exit_reason(pos, mark, prices[und], now, self.cfg, t_exit)
+                if reason:
+                    debit = self.broker.close_condor(pos["legs"], pos["qty"])
+                    live = self.broker.positions() if not self.broker.dry else {}
+                    if any(l["symbol"] in live for l in pos["legs"]):
+                        log.warning("%s: condor close not fully filled — retrying next minute", sym)
+                        continue
+                    self.state.pop(sym, None); self.save()
+                    self._last_exit[und] = now
+                    self.journal(pos, sym, debit or mark, reason, now)
+                continue
             if pos["kind"] == "shares":
                 held = (now - datetime.fromisoformat(pos["entry_time"])).total_seconds() / 60
                 reason = None

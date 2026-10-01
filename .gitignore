@@ -3,7 +3,9 @@
 
 # Bot's own runtime files
 state.json
+state_*.json
 trades.csv
+trades_*.csv
 backtest_trades.csv
 logs/
 data_cache/

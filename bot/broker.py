@@ -13,10 +13,10 @@ from alpaca.data.requests import (OptionLatestQuoteRequest, OptionSnapshotReques
                                   StockLatestTradeRequest)
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from alpaca.trading.client import TradingClient
-from alpaca.trading.enums import (AssetStatus, ContractType, OrderClass, OrderSide, QueryOrderStatus,
-                                  TimeInForce)
+from alpaca.trading.enums import (AssetStatus, ContractType, OrderClass, OrderSide, PositionIntent,
+                                  QueryOrderStatus, TimeInForce)
 from alpaca.trading.requests import (GetOptionContractsRequest, GetOrdersRequest, LimitOrderRequest,
-                                     MarketOrderRequest, StopLossRequest, TakeProfitRequest)
+                                     MarketOrderRequest, OptionLegRequest, StopLossRequest, TakeProfitRequest)
 
 log = logging.getLogger("broker")
 
@@ -214,6 +214,138 @@ class Broker:
         if not fills:
             return 0.0
         return float(max(fills, key=lambda o: o.filled_at).filled_avg_price)
+
+    # ------------------------------------------------------------------ iron condors
+    def chain_for_expiry(self, underlying: str, spot: float, expiry: date, pct: float = 0.05) -> list[dict]:
+        """Calls and puts expiring on `expiry` within +/- pct of spot, with quotes and delta."""
+        contracts, token = [], None
+        while True:
+            req = GetOptionContractsRequest(
+                underlying_symbols=[underlying], status=AssetStatus.ACTIVE,
+                expiration_date=expiry, strike_price_gte=str(round(spot * (1 - pct), 2)),
+                strike_price_lte=str(round(spot * (1 + pct), 2)), limit=1000, page_token=token)
+            res = self.trading.get_option_contracts(req)
+            contracts += res.option_contracts or []
+            token = getattr(res, "next_page_token", None)
+            if not token:
+                break
+        base = {c.symbol: {"symbol": c.symbol, "type": "call" if "call" in str(c.type).lower() else "put",
+                           "strike": float(c.strike_price)} for c in contracts}
+        syms = list(base)
+        for i in range(0, len(syms), 100):
+            snaps = self.options.get_option_snapshot(OptionSnapshotRequest(symbol_or_symbols=syms[i:i + 100],
+                                                                           feed=self.opt_feed))
+            for sym, snap in snaps.items():
+                q = snap.latest_quote
+                base[sym].update(bid=float(q.bid_price) if q else 0.0, ask=float(q.ask_price) if q else 0.0,
+                                 delta=float(snap.greeks.delta) if snap.greeks and snap.greeks.delta is not None else None)
+        return [c for c in base.values() if "bid" in c]
+
+    def expirations(self, underlying: str, start: date, end: date, spot: float) -> list[date]:
+        """All expiration dates between start and end (looks at strikes near the current price)."""
+        exps, token = set(), None
+        while True:
+            res = self.trading.get_option_contracts(GetOptionContractsRequest(
+                underlying_symbols=[underlying], status=AssetStatus.ACTIVE, expiration_date_gte=start,
+                expiration_date_lte=end, strike_price_gte=str(round(spot * 0.99, 2)),
+                strike_price_lte=str(round(spot * 1.01, 2)), limit=1000, page_token=token))
+            for c in res.option_contracts or []:
+                e = c.expiration_date
+                exps.add(e if isinstance(e, date) else date.fromisoformat(str(e)))
+            token = getattr(res, "next_page_token", None)
+            if not token:
+                break
+        return sorted(exps)
+
+    def quotes(self, symbols: list[str]) -> dict:
+        out = {}
+        for i in range(0, len(symbols), 100):
+            res = self.options.get_option_latest_quote(OptionLatestQuoteRequest(symbol_or_symbols=symbols[i:i + 100],
+                                                                               feed=self.opt_feed))
+            out.update({s: (float(q.bid_price), float(q.ask_price)) for s, q in res.items()})
+        return out
+
+    def _legs(self, legs: list[dict], closing: bool):
+        out = []
+        for leg in legs:
+            sell = (leg["side"] == "sell") != closing          # closing flips every leg
+            if closing:
+                intent = PositionIntent.SELL_TO_CLOSE if sell else PositionIntent.BUY_TO_CLOSE
+            else:
+                intent = PositionIntent.SELL_TO_OPEN if sell else PositionIntent.BUY_TO_OPEN
+            side = OrderSide.SELL if sell else OrderSide.BUY
+            try:
+                out.append(OptionLegRequest(symbol=leg["symbol"], ratio_qty=1, side=side, position_intent=intent))
+            except (TypeError, ValueError):  # older alpaca-py without position_intent
+                out.append(OptionLegRequest(symbol=leg["symbol"], ratio_qty=1, side=side))
+        return out
+
+    def _mleg(self, legs, qty, price, closing, market=False):
+        """Alpaca convention for multi-leg limit prices: negative = credit received, positive = debit paid."""
+        kw = dict(qty=qty, order_class=OrderClass.MLEG, time_in_force=TimeInForce.DAY, legs=self._legs(legs, closing))
+        req = MarketOrderRequest(**kw) if market else LimitOrderRequest(limit_price=round(price, 2), **kw)
+        o = self.trading.submit_order(req)
+        o = self._wait_fill(o.id, 15 if not market else 25)
+        if str(o.status).split(".")[-1].lower() != "filled":
+            try:
+                self.trading.cancel_order_by_id(o.id); time.sleep(1)
+                o = self.trading.get_order_by_id(o.id)
+            except APIError:
+                pass
+        fq = int(float(o.filled_qty or 0))
+        if not fq:
+            return 0, 0.0
+        avg = o.filled_avg_price
+        return fq, abs(float(avg)) if avg not in (None, "", 0, "0") else abs(price)  # fall back to our limit price
+
+    def open_condor(self, condor: dict, qty: int, retries: int, min_credit: float):
+        """Sell the condor for a credit: start at the mid credit, give up a little each retry, never below min_credit.
+        Returns (filled_qty, credit_per_condor)."""
+        if self.dry:
+            log.info("[DRY RUN] would sell %d iron condor(s) for ~$%.2f", qty, condor["credit_mid"])
+            return 0, 0.0
+        filled, total = 0, 0.0
+        for attempt in range(retries + 1):
+            q = self.quotes([l["symbol"] for l in condor["legs"]])
+            mid = nat = 0.0
+            for leg in condor["legs"]:
+                bid, ask = q[leg["symbol"]]
+                mid += (bid + ask) / 2 * (1 if leg["side"] == "sell" else -1)
+                nat += bid if leg["side"] == "sell" else -ask
+            price = max(min_credit, mid - (mid - nat) * attempt / max(retries, 1))
+            if price < min_credit or mid < min_credit:
+                log.info("Condor credit fell below the minimum ($%.2f) — not opening", min_credit)
+                break
+            fq, px = self._mleg(condor["legs"], qty - filled, -price, closing=False)
+            if fq:
+                total += fq * px; filled += fq
+            if filled >= qty:
+                break
+        return filled, (total / filled if filled else 0.0)
+
+    def close_condor(self, legs: list[dict], qty: int):
+        """Buy the condor back: limit at mid debit, then toward the natural price, then market. Returns avg debit."""
+        if self.dry:
+            return 0.0
+        filled, total = 0, 0.0
+        for step in range(3):
+            remaining = qty - filled
+            if remaining <= 0:
+                break
+            if step == 2:
+                fq, px = self._mleg(legs, remaining, 0, closing=True, market=True)
+            else:
+                q = self.quotes([l["symbol"] for l in legs])
+                mid = nat = 0.0
+                for leg in legs:
+                    bid, ask = q[leg["symbol"]]
+                    mid += (bid + ask) / 2 * (1 if leg["side"] == "sell" else -1)
+                    nat += ask if leg["side"] == "sell" else -bid
+                price = max(0.01, mid if step == 0 else nat)
+                fq, px = self._mleg(legs, remaining, price, closing=True)
+            if fq:
+                total += fq * px; filled += fq
+        return total / filled if filled else 0.0
 
     def positions(self) -> dict:
         return {p.symbol: p for p in self.trading.get_all_positions()}
