@@ -61,7 +61,7 @@ risk:
   cooldown_after_loss_min: 20
 
 news:
-  enabled: true
+  enabled: false           # false = trade on technical analysis only (no news pauses or news-mood blocking)
   poll_seconds: 120
   lookback_minutes: 90     # headlines considered "current"
   block_score: -0.5        # sentiment below this blocks new longs (and above +0.5 blocks new puts/shorts)
