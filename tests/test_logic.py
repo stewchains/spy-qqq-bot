@@ -384,3 +384,16 @@ def test_swing_condor_expiry_and_dte_exit():
     later = now + timedelta(days=9)                                            # 21 DTE
     assert "days to expiration" in condor_exit_reason(pos, 1.40, 600, later, sw, None)
     assert sw["bot_name"] == "swing" and sw["lock_port"] != CFG.get("lock_port", 47823)
+
+
+def test_fill_missing_deltas():
+    from bot.condor import _bs_price, fill_missing_deltas
+    t = 3 / (365 * 24)  # 3 hours left
+    chain = []
+    for k, typ in ((600, "call"), (602, "call"), (598, "put")):
+        px = _bs_price(600, k, t, 0.15, typ == "call")
+        chain.append({"symbol": f"{typ}{k}", "type": typ, "strike": k, "bid": px - 0.005, "ask": px + 0.005, "delta": None})
+    assert fill_missing_deltas(chain, 600, t) == 3
+    atm, otm_call, otm_put = (c["delta"] for c in chain)
+    assert 0.45 < atm < 0.55
+    assert 0 < otm_call < 0.2 and -0.2 < otm_put < 0

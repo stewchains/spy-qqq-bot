@@ -12,6 +12,7 @@ Defaults come from published research (see README "Iron condor research"):
 Technical analysis decides WHEN: only open a condor when the 5-minute chart looks range-bound
 (weak trend, RSI near 50, price near VWAP, Bollinger Bands not expanding).
 """
+import math
 from datetime import date, datetime, time as dtime
 
 
@@ -154,3 +155,47 @@ def choose_expiries(expirations: list, today: date, cfg: dict) -> list:
 def choose_expiry(expirations: list, today: date, cfg: dict):
     ranked = choose_expiries(expirations, today, cfg)
     return ranked[0] if ranked else None
+
+
+# ----------------------------------------------------------------------------- deltas when the feed has none
+def _ncdf(x: float) -> float:
+    return 0.5 * (1 + math.erf(x / math.sqrt(2)))
+
+
+def _bs_price(spot, k, t, vol, call):
+    if t <= 0 or vol <= 0:
+        return max(0.0, spot - k) if call else max(0.0, k - spot)
+    d1 = (math.log(spot / k) + 0.5 * vol * vol * t) / (vol * math.sqrt(t))
+    d2 = d1 - vol * math.sqrt(t)
+    return spot * _ncdf(d1) - k * _ncdf(d2) if call else k * _ncdf(-d2) - spot * _ncdf(-d1)
+
+
+def _bs_delta(spot, k, t, vol, call):
+    d1 = (math.log(spot / k) + 0.5 * vol * vol * t) / (vol * math.sqrt(t))
+    return _ncdf(d1) if call else _ncdf(d1) - 1
+
+
+def fill_missing_deltas(chain: list[dict], spot: float, years_to_expiry: float) -> int:
+    """Alpaca's free feed often has no greeks for options expiring today. Back out implied volatility from
+    each option's mid price (Black-Scholes, zero rates) and compute delta. Returns how many were filled."""
+    t = max(years_to_expiry, 1 / (365 * 24 * 60))
+    n = 0
+    for c in chain:
+        if c.get("delta") is not None or c.get("ask", 0) <= 0:
+            continue
+        call = c["type"] == "call"
+        mid = (c.get("bid", 0) + c["ask"]) / 2
+        intrinsic = max(0.0, spot - c["strike"]) if call else max(0.0, c["strike"] - spot)
+        if mid <= intrinsic + 0.005:
+            continue  # no time value left to measure
+        lo, hi = 0.01, 5.0
+        for _ in range(60):  # bisection on volatility
+            mid_vol = (lo + hi) / 2
+            if _bs_price(spot, c["strike"], t, mid_vol, call) > mid:
+                hi = mid_vol
+            else:
+                lo = mid_vol
+        c["delta"] = round(_bs_delta(spot, c["strike"], t, (lo + hi) / 2, call), 4)
+        c["delta_estimated"] = True
+        n += 1
+    return n

@@ -10,8 +10,8 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from .broker import Broker
-from .condor import (choose_expiries, condor_contracts, condor_exit_reason, condor_mark, pick_condor,
-                     range_filter)
+from .condor import (choose_expiries, condor_contracts, condor_exit_reason, condor_mark, fill_missing_deltas,
+                     pick_condor, range_filter)
 from .events import EventCalendar
 from .exits import option_exit_reason, session_time, _t
 from .news import NewsMonitor
@@ -271,6 +271,11 @@ class TradingBot:
             if not chain:
                 msg = f"no options for {expiry}"
                 continue
+            if any(c.get("delta") is None for c in chain):
+                close_dt = datetime(expiry.year, expiry.month, expiry.day, 16, 0, tzinfo=ET)
+                filled = fill_missing_deltas(chain, spot, (close_dt - now).total_seconds() / (365 * 24 * 3600))
+                if filled:
+                    self._note(f"delta-{sym}", f"{sym}: feed had no greeks for {expiry}; estimated {filled} deltas from prices")
             condor, msg = pick_condor(chain, spot, self.cfg)
             log.info("%s condor pick (%s): %s", sym, expiry, msg)
             if condor:
