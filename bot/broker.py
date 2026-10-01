@@ -239,7 +239,12 @@ class Broker:
                 q = snap.latest_quote
                 base[sym].update(bid=float(q.bid_price) if q else 0.0, ask=float(q.ask_price) if q else 0.0,
                                  delta=float(snap.greeks.delta) if snap.greeks and snap.greeks.delta is not None else None)
-        return [c for c in base.values() if "bid" in c]
+        got = [c for c in base.values() if "bid" in c]
+        ks = [c["strike"] for c in base.values()]
+        self.last_chain_stats = {"contracts": len(base), "with_quotes": len(got),
+                                 "strike_range_requested": [round(spot * (1 - pct), 2), round(spot * (1 + pct), 2)],
+                                 "strike_range_returned": [min(ks), max(ks)] if ks else None}
+        return got
 
     def expirations(self, underlying: str, start: date, end: date, spot: float) -> list[date]:
         """All expiration dates between start and end (looks at strikes near the current price)."""

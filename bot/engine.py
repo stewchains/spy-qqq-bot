@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from .broker import Broker
-from .condor import (choose_expiry, condor_contracts, condor_exit_reason, condor_mark, pick_condor,
+from .condor import (choose_expiries, condor_contracts, condor_exit_reason, condor_mark, pick_condor,
                      range_filter)
 from .events import EventCalendar
 from .exits import option_exit_reason, session_time, _t
@@ -260,17 +260,29 @@ class TradingBot:
         if swing:
             exps = self.broker.expirations(sym, now.date() + timedelta(days=k["min_dte"]),
                                            now.date() + timedelta(days=k["max_dte"]), spot)
-            expiry = choose_expiry(exps, now.date(), self.cfg)
-            if not expiry:
+            expiries = choose_expiries(exps, now.date(), self.cfg)[:3]
+            if not expiries:
                 return self._note(f"chain-{sym}", f"{sym}: no expiration {k['min_dte']}-{k['max_dte']} days out")
         else:
-            expiry = now.date()
-        chain = self.broker.chain_for_expiry(sym, spot, expiry, pct=k.get("chain_pct", 0.05))
-        if not chain:
-            return self._note(f"chain-{sym}", f"{sym}: no options for {expiry}")
-        condor, msg = pick_condor(chain, spot, self.cfg)
-        log.info("%s condor pick: %s", sym, msg)
+            expiries = [now.date()]
+        condor = None
+        for expiry in expiries:        # try the best expiration first, fall back to the next ones
+            chain = self.broker.chain_for_expiry(sym, spot, expiry, pct=k.get("chain_pct", 0.05))
+            if not chain:
+                msg = f"no options for {expiry}"
+                continue
+            condor, msg = pick_condor(chain, spot, self.cfg)
+            log.info("%s condor pick (%s): %s", sym, expiry, msg)
+            if condor:
+                break
         if not condor:
+            # save the option chain once per day per symbol so problems can be diagnosed from the logs folder
+            dbg = ROOT / "logs" / f"chaindebug_{self.cfg.get('bot_name') or 'main'}_{sym}_{now:%Y%m%d}.json"
+            if not dbg.exists() and chain:
+                dbg.write_text(json.dumps({"spot": spot, "expiry": str(expiry), "reason": msg,
+                                           "stats": getattr(self.broker, "last_chain_stats", None),
+                                           "chain": sorted(chain, key=lambda c: (c["type"], c["strike"]))},
+                                          indent=1, default=str))
             return
         qty = condor_contracts(acct["equity"], condor["max_loss"], self.cfg)
         if qty < 1:

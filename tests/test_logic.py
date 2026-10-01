@@ -373,9 +373,10 @@ def test_swing_condor_expiry_and_dte_exit():
     from bot.condor import choose_expiry, condor_exit_reason
     sw = yaml.safe_load((Path(__file__).resolve().parent.parent / "config_swing.yaml").read_text())
     today = date(2026, 10, 2)
-    exps = [today + timedelta(days=d) for d in (7, 24, 31, 38, 44, 52)]
-    assert choose_expiry(exps, today, sw) == today + timedelta(days=44)
-    assert choose_expiry([today + timedelta(days=60)], today, sw) is None
+    exps = [today + timedelta(days=d) for d in (7, 24, 31, 38, 42, 49, 56)]   # Oct 2 + 49 = Nov 20 (3rd Friday)
+    assert choose_expiry(exps, today, sw) == date(2026, 11, 20)              # monthly preferred
+    assert choose_expiry([e for e in exps if e != date(2026, 11, 20)], today, sw) == today + timedelta(days=42)
+    assert choose_expiry([today + timedelta(days=70)], today, sw) is None
     pos = {"credit": 1.50, "short_put": 570, "short_call": 630, "expiration": (today + timedelta(days=30)).isoformat()}
     now = datetime(2026, 10, 2, 11, 0, tzinfo=ET)
     assert condor_exit_reason(pos, 1.40, 569, now, sw, None) is None          # no breach exit in swing mode

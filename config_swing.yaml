@@ -42,9 +42,9 @@ strategy:
 
 condor:                    # 30-45 day iron condors (tastytrade method + Cboe CNDR index) — see README
   mode: swing              # hold for days/weeks; NOT closed at the end of each day
-  target_dte: 45           # open the expiration closest to 45 days out...
-  min_dte: 30              # ...within 30-45 days
-  max_dte: 45
+  target_dte: 45           # aim for ~45 days out...
+  min_dte: 30              # ...anywhere from 30-50 days, preferring the standard monthly (3rd Friday)
+  max_dte: 50              #    expiration, which has the full set of strikes
   chain_pct: 0.15          # look at strikes within +/-15% of the price
   short_delta: 0.16        # sell ~16-delta put and call (~1 standard deviation; tastytrade standard)
   short_delta_range: [0.12, 0.20]

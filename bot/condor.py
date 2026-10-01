@@ -138,8 +138,19 @@ def condor_contracts(equity: float, max_loss_per: float, cfg: dict) -> int:
     return max(0, min(n, cfg["condor"]["max_contracts"]))
 
 
-def choose_expiry(expirations: list, today: date, cfg: dict):
-    """Swing mode: the expiration closest to target_dte within [min_dte, max_dte]."""
+def is_monthly(d: date) -> bool:
+    """Standard monthly expiration = third Friday. These list the full set of strikes; newly listed weeklies
+    often only have strikes near the current price, which leaves no room for 16-delta shorts and wings."""
+    return d.weekday() == 4 and 15 <= d.day <= 21
+
+
+def choose_expiries(expirations: list, today: date, cfg: dict) -> list:
+    """Swing mode: expirations within [min_dte, max_dte], monthly ones first, then closest to target_dte."""
     k = cfg["condor"]
     ok = [e for e in expirations if k["min_dte"] <= (e - today).days <= k["max_dte"]]
-    return min(ok, key=lambda e: abs((e - today).days - k["target_dte"])) if ok else None
+    return sorted(ok, key=lambda e: (not is_monthly(e), abs((e - today).days - k["target_dte"])))
+
+
+def choose_expiry(expirations: list, today: date, cfg: dict):
+    ranked = choose_expiries(expirations, today, cfg)
+    return ranked[0] if ranked else None
