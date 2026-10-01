@@ -93,12 +93,23 @@ class TradingBot:
 
     # ------------------------------------------------------------------ main loop
     def run(self):
-        acct = self.broker.account()
+        for attempt in range(1, 21):  # ride out brief network/Alpaca hiccups at startup (up to ~10 minutes)
+            try:
+                acct = self.broker.account()
+                break
+            except Exception as e:  # noqa: BLE001
+                log.warning("Can't reach Alpaca yet (attempt %d/20): %s — retrying in 30s", attempt, str(e)[:120])
+                time.sleep(30)
+        else:
+            raise SystemExit("Couldn't connect to Alpaca after 10 minutes. Check your internet and API keys.")
         log.info("Connected to Alpaca %s account. Equity $%.2f, options level %s",
                  "PAPER" if self.broker.paper else "*** LIVE ***", acct["equity"], acct["options_level"])
         if acct["blocked"]:
             raise SystemExit("Account is blocked from trading. Check your Alpaca dashboard.")
-        self.reconcile()
+        try:
+            self.reconcile()
+        except Exception:  # noqa: BLE001 — will reconcile again on the next cycle
+            log.exception("startup reconcile failed; will retry in the main loop")
         traded_today = False
         while True:
             try:
