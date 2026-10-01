@@ -127,7 +127,7 @@ class TradingBot:
         ok, why = self.risk.can_open(now, acct["equity"], len(self.state))
         if not ok:
             return self._note("gate", why)
-        ev = self.events.blocking(now)
+        ev = self.events.blocking(now) if self.cfg["events"].get("enabled", True) else None
         if ev:
             return self._note("event", f"no entries: {ev} window")
         if self.news.paused(now.astimezone(timezone.utc)):
