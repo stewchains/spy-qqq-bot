@@ -100,6 +100,17 @@ def test_news_scoring_and_shock():
     assert score_text("Analyst issues forward guidance award") == 0  # 'war' inside words must not match
     assert is_shock("Powell says Fed ready to act") and is_shock("Hotter CPI print rattles markets")
     assert not is_shock("Apple unveils new iPhone colors")
+    # real market movers still pause trading
+    for h in ("Fed holds rates steady, signals two cuts", "FOMC statement: Federal Reserve cuts interest rates by 25 bps",
+              "Nonfarm payrolls rise 250K, beating estimates", "Market-wide circuit breaker triggered as S&P 500 drops 7%",
+              "Trump announces new tariffs on all imports", "Russia launches missile strike on Kyiv"):
+        assert is_shock(h), h
+    # headlines that wrongly paused trading on Oct 1, 2026 must not
+    for h in ("Fed's Schmid Says Trying To See In Data How Much Inflation Is Due To Demand, How Much Is Driven By Supply Shocks",
+              "Trading Halt: Halt status updated at 9:30:00 AM ET: Quotation Resumption: IPO security released for quotation",
+              "Diesel Prices May Stay Elevated For 'More Than Four Quarters,' Dallas Fed Survey Finds, As Trump Weighs Export Ban",
+              "Analysts warn of a price war among streaming services", "Nexalin Technology Shares Halted On Circuit Breaker To The Upside, Stock Now Up 92.76%", "XYZ Corp shares halted pending news"):
+        assert not is_shock(h), h
 
 
 def test_news_monitor_pause():

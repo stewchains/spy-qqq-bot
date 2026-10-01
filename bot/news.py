@@ -37,12 +37,23 @@ NEG = {
     "below estimates": 0.9, "bearish": 0.8, "fears": 0.6, "warning": 0.5, "halted": 0.8, "lower": 0.3,
     "bankruptcy": 1, "volatility spikes": 0.8, "vix jumps": 0.8,
 }
-SHOCK = [
-    r"\bfed\b", r"\bfomc\b", r"powell", r"rate (hike|cut|decision)", r"\bcpi\b", r"\bppi\b",
-    r"inflation (data|report)", r"jobs report", r"payrolls", r"unemployment rate", r"tariff",
-    r"\bwar\b", r"missile", r"invasion", r"attack", r"sanction", r"circuit breaker", r"trading halt",
-    r"halted", r"credit rating", r"downgrade.*(u\.s\.|united states|treasur)", r"default",
-    r"emergency", r"bank failure", r"flash crash", r"government shutdown",
+SHOCK = [  # only truly market-moving headlines pause trading
+    # Fed policy (not regional Fed surveys or staff speeches)
+    r"\bfomc\b", r"\bpowell\b",
+    r"\b(fed|federal reserve)\b.{0,25}\b(raises|hikes|cuts|holds|lowers|leaves|keeps) (interest )?rates?",
+    r"\brate (decision|hike|cut) (announced|decision)", r"emergency rate", r"fed decision",
+    # major data releases
+    r"\bcpi\b", r"consumer price index", r"jobs report", r"nonfarm payrolls", r"\bpayrolls\b",
+    r"unemployment rate (rises|falls|rose|fell|jumps|climbs|drops|ticks|unexpectedly)",
+    # market-wide stress (not single-stock halts)
+    r"(market-wide|s&p|index|dow|stock market).{0,40}circuit breaker", r"circuit breaker.{0,40}(market-wide|s&p|index|dow)", r"market-wide (trading )?halt", r"(nyse|nasdaq|exchanges?) (halts|suspends) (all )?trading",
+    r"flash crash", r"bank failure", r"(u\.s\.|united states|us) credit rating", r"downgrades? (the )?(u\.s\.|united states)",
+    r"(u\.s\.|us|government) default", r"government shutdown",
+    # geopolitics
+    r"declares war", r"missile (strike|attack|launch)", r"invasion", r"(military|terror|terrorist) attack", r"airstrikes?",
+    r"nuclear (strike|attack|test)",
+    # big trade-policy moves
+    r"new tariffs", r"tariffs? on (all|china|chinese|eu|europe|canada|mexico|japan)",
 ]
 _shock_re = re.compile("|".join(SHOCK), re.I)
 
