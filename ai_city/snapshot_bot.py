@@ -167,8 +167,7 @@ def main() -> int:
     if not output_path.is_absolute():
         output_path = ROOT / output_path
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(snapshot, indent=2, default=str) + "
-", encoding="utf-8")
+    output_path.write_text(json.dumps(snapshot, indent=2, default=str) + "\\n", encoding="utf-8")
     print(f"Wrote read-only snapshot: {output_path}")
     print(f"Strategy: {snapshot['bot']['strategy_type']} | paper_mode_in_config={snapshot['bot']['paper_mode_in_config']}")
     print(f"Journal trades: {snapshot['trade_journal']['trade_count']} | realized P&L: {snapshot['trade_journal'].get('realized_pnl_sum_usd')}")
