@@ -45,3 +45,32 @@ def test_heartbeat_sends_only_non_secret_read_metrics(monkeypatch):
     assert captured["payload"]["mode"] == "paper"
     assert captured["payload"]["metrics"]["equity"] == 10500.12
     assert "api_key" not in captured["payload"]["metrics"]
+
+
+
+def test_generic_heartbeat_redacts_secret_like_metrics(monkeypatch):
+    monkeypatch.setenv("AI_CITY_TELEMETRY_URL", "https://city.example")
+    monkeypatch.setenv("AI_CITY_TELEMETRY_TOKEN", "separate-telemetry-token")
+    captured = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured["payload"] = json
+        return SimpleNamespace(raise_for_status=lambda: None)
+
+    import requests
+    monkeypatch.setattr(requests, "post", fake_post)
+
+    from ai_city.telemetry import post_heartbeat
+    ok = post_heartbeat(
+        bot_id="crypto-paper-1",
+        system="crypto",
+        mode="paper",
+        status="healthy",
+        metrics={
+            "net_pnl": 12.4,
+            "api_key": "never-send-this",
+            "nested": {"access_token": "never-send-this", "drawdown_pct": 2.1},
+        },
+    )
+    assert ok is True
+    assert captured["payload"]["metrics"] == {"net_pnl": 12.4, "nested": {"drawdown_pct": 2.1}}
