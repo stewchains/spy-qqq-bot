@@ -14,6 +14,8 @@ on:
       - "ai-city/read-only-observability"
     paths:
       - "ai_city/**"
+      - "bot/**"
+      - "run_bot.py"
       - "tests/test_ai_city_snapshot.py"
       - "tests/test_ai_city_telemetry.py"
       - ".github/workflows/ai-city-tests.yml"
