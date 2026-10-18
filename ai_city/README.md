@@ -43,3 +43,21 @@ After the separate Local Fitted City service has been deployed and its heartbeat
 The sender requires HTTPS and catches request failures so telemetry cannot intentionally change trading decisions. It may send bot ID, paper/live mode flag from the selected config, strategy label, symbols, tracked-position count, market-open status, and selected account metrics (equity/buying power) when available. Do not enable it until you have reviewed what the dashboard stores and who has access.
 
 This branch is a draft, not deployed. It only covers the SPY/QQQ bot, not the user's crypto bots. Keep the `main` branch and any running live bot unchanged until the pull request is reviewed and tested in the actual bot environment.
+
+### Reuse the generic client for crypto bots
+
+The reusable `post_heartbeat()` helper can be called from a different bot project once that repository is available. Example:
+
+```python
+from ai_city.telemetry import post_heartbeat
+
+post_heartbeat(
+    bot_id="crypto-paper-1",
+    system="crypto",
+    mode="paper",  # use "live" for the live bot
+    status="healthy",
+    metrics={"equity": 10000, "realized_pnl": 12.50, "open_positions": 1},
+)
+```
+
+Do not include API keys, order payloads, wallet addresses, exchange tokens, or credentials in metrics. The helper strips secret-like metric keys as an extra safeguard, requires HTTPS, has a short timeout, and returns `False` rather than raising when telemetry is disabled or fails. This sends telemetry only; it does not place, cancel, or alter orders. It can be copied into another repo, but each actual crypto bot needs a small adapter and tests appropriate to its code structure.
