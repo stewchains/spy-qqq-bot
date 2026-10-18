@@ -25,6 +25,9 @@ def send_bot_heartbeat(
     token = os.getenv("AI_CITY_TELEMETRY_TOKEN", "").strip()
     if not url or not token:
         return False
+    if not url.startswith("https://"):
+        log.warning("AI City heartbeat disabled: telemetry URL must use HTTPS")
+        return False
 
     mode_cfg = cfg.get("mode", {})
     paper_value = mode_cfg.get("paper")
