@@ -19,6 +19,7 @@ from .options_selector import pick_contract
 from .risk import RiskManager
 from .indicators import add_all
 from .strategy import daily_with_live, evaluate
+from ai_city.telemetry import send_bot_heartbeat
 
 ET = ZoneInfo("America/New_York")
 log = logging.getLogger("bot")
@@ -40,6 +41,7 @@ def use_bot_files(name: str | None):
 class TradingBot:
     def __init__(self, cfg: dict, key: str, secret: str):
         self.cfg = cfg
+        self._last_account = None
         self.broker = Broker(key, secret, cfg)
         self.news = NewsMonitor(cfg, key, secret)
         self.events = EventCalendar(str(ROOT / cfg["events"]["file"]), cfg["events"]["minutes_before"],
@@ -112,24 +114,44 @@ class TradingBot:
             log.exception("startup reconcile failed; will retry in the main loop")
         traded_today = False
         while True:
+            heartbeat_status = "healthy"
+            market_open = None
             try:
                 clock = self.broker.clock()
+                market_open = bool(clock.is_open)
                 if not clock.is_open:
                     if traded_today and self.cfg["schedule"].get("exit_after_close", True):
                         self.reconcile()
                         self.daily_report()
                         log.info("Market closed for the day. Bot exiting (it starts fresh next morning).")
+                        self.send_city_heartbeat("stopped", market_open=False)
                         return
+                    # The process remains alive while waiting for the next session.
+                    self.send_city_heartbeat("healthy", market_open=False)
                     self.sleep_until_open(clock)
                     continue
                 traded_today = True
                 self.close_et = clock.next_close.astimezone(ET)
                 self.cycle()
             except KeyboardInterrupt:
+                self.send_city_heartbeat("stopped", market_open=market_open)
                 raise
             except Exception:  # noqa: BLE001 — keep the bot alive, log the error, try again next minute
                 log.exception("cycle error")
+                heartbeat_status = "degraded"
+            self.send_city_heartbeat(heartbeat_status, market_open=market_open)
             time.sleep(self.cfg["schedule"]["loop_seconds"])
+
+    def send_city_heartbeat(self, status: str, market_open: bool | None = None):
+        """Optional, best-effort telemetry; disabled unless AI City env vars are configured."""
+        send_bot_heartbeat(
+            bot_id=self.cfg.get("bot_name") or "spy-qqq-main",
+            cfg=self.cfg,
+            state=self.state,
+            account=self._last_account,
+            status=status,
+            market_open=market_open,
+        )
 
     def daily_report(self):
         """End-of-day report (HTML in reports/ + Discord). Never lets a report problem crash the bot."""
@@ -177,6 +199,7 @@ class TradingBot:
     def cycle(self):
         now = datetime.now(ET)
         acct = self.broker.account()
+        self._last_account = acct
         self.risk.new_day(now.date(), acct["last_equity"] or acct["equity"])  # yesterday's close, survives restarts
         self.news.poll(now.astimezone(timezone.utc))
         self.reconcile()
