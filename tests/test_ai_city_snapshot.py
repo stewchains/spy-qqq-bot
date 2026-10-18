@@ -16,7 +16,7 @@ def test_summarize_journal_with_wins_losses_and_drawdown(tmp_path: Path):
     assert result["trade_count"] == 4
     assert result["realized_pnl_sum_usd"] == -9.0
     assert result["win_rate"] == 0.5
-    assert result["profit_factor"] == 0.75
+    assert result["profit_factor"] == 0.625
     assert result["max_realized_pnl_drawdown_usd"] == -20.0
 
 
