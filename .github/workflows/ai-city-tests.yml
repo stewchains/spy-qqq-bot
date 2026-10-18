@@ -5,6 +5,7 @@ on:
     paths:
       - "ai_city/**"
       - "tests/test_ai_city_snapshot.py"
+      - "tests/test_ai_city_telemetry.py"
       - ".github/workflows/ai-city-tests.yml"
   push:
     branches:
@@ -25,4 +26,4 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install --upgrade pip pytest pyyaml
       - name: Run read-only snapshot tests
-        run: python -m pytest -q tests/test_ai_city_snapshot.py
+        run: python -m pytest -q tests/test_ai_city_snapshot.py tests/test_ai_city_telemetry.py
