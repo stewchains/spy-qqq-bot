@@ -1,0 +1,28 @@
+name: AI City snapshot tests
+
+on:
+  pull_request:
+    paths:
+      - "ai_city/**"
+      - "tests/test_ai_city_snapshot.py"
+      - ".github/workflows/ai-city-tests.yml"
+  push:
+    branches:
+      - "ai-city/read-only-observability"
+    paths:
+      - "ai_city/**"
+      - "tests/test_ai_city_snapshot.py"
+      - ".github/workflows/ai-city-tests.yml"
+
+jobs:
+  snapshot-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip pytest pyyaml
+      - name: Run read-only snapshot tests
+        run: python -m pytest -q tests/test_ai_city_snapshot.py
