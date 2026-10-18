@@ -169,7 +169,15 @@ class TradingBot:
         wait = (clock.next_open - clock.timestamp).total_seconds()
         log.info("Market closed. Next open %s ET (%.1f h). Sleeping.",
                  clock.next_open.astimezone(ET).strftime("%a %b %d %H:%M"), wait / 3600)
-        time.sleep(max(60, min(wait - 120, 1800)))
+        telemetry_enabled = bool(
+            os.getenv("AI_CITY_TELEMETRY_URL", "").strip()
+            and os.getenv("AI_CITY_TELEMETRY_TOKEN", "").strip()
+        )
+        # Preserve the original long sleep when telemetry is disabled. When enabled,
+        # wake at most every minute so the dashboard can distinguish a running bot
+        # from a stopped/stale process. No trading logic runs while the market is closed.
+        max_sleep = 60 if telemetry_enabled else 1800
+        time.sleep(max(60, min(wait - 120, max_sleep)))
 
     def reconcile(self):
         """Drop tracked positions that no longer exist at the broker (closed by bracket, expired, or manually)."""
