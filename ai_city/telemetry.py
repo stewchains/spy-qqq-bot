@@ -5,6 +5,7 @@ Sends status/metrics only. Never sends credentials, orders, or strategy signals.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 from typing import Any
@@ -45,9 +46,13 @@ def post_heartbeat(
         log.warning("AI City heartbeat disabled: telemetry URL must use HTTPS")
         return False
 
-    safe_metrics = _sanitize_metrics(metrics or {})
-    if len(__import__("json").dumps(safe_metrics, separators=(",", ":"), default=str)) > 9000:
-        log.warning("AI City heartbeat skipped: sanitized metrics exceed 9 KB")
+    try:
+        safe_metrics = _sanitize_metrics(metrics or {})
+        if len(json.dumps(safe_metrics, separators=(",", ":"), default=str)) > 9000:
+            log.warning("AI City heartbeat skipped: sanitized metrics exceed 9 KB")
+            return False
+    except Exception as exc:  # A malformed metric must not interrupt the bot.
+        log.warning("AI City heartbeat skipped: metric sanitization failed (%s)", type(exc).__name__)
         return False
     payload = {
         "bot_id": str(bot_id)[:100],
