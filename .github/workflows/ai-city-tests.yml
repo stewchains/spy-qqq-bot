@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - "ai_city/**"
+      - "bot/**"
+      - "run_bot.py"
       - "tests/test_ai_city_snapshot.py"
       - "tests/test_ai_city_telemetry.py"
       - ".github/workflows/ai-city-tests.yml"
@@ -26,5 +28,7 @@ jobs:
           python-version: "3.11"
       - name: Install test dependencies
         run: python -m pip install --upgrade pip pytest -r requirements.txt
-      - name: Run read-only snapshot tests
-        run: python -m pytest -q tests/test_ai_city_snapshot.py tests/test_ai_city_telemetry.py
+      - name: Compile bot and city code
+        run: python -m compileall -q bot ai_city run_bot.py
+      - name: Run full test suite
+        run: python -m pytest -q
